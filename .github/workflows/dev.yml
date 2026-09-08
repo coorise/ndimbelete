@@ -1,3 +1,6 @@
+# Dev prerelease — runs on every push to `dev`.
+# Work here with the team; do not push feature work to `main`.
+
 name: Dev release (dev)
 
 on:

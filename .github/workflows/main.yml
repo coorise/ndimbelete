@@ -1,3 +1,11 @@
+# Production release — runs only when `main` receives commits
+# (normally after a Pull Request from `dev` is merged).
+#
+# Team flow:
+#   1. Develop & push on `dev`  → Dev prerelease builds
+#   2. Open PR  dev → main
+#   3. Merge PR               → this workflow publishes production
+
 name: Production release (main)
 
 on:
@@ -61,7 +69,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Ndimbelente v__VERSION__"
           releaseBody: |
-            Production build from `main`.
+            Production build from `main` (merged from `dev`).
 
             Install the Windows setup from the assets below.
           releaseDraft: false
