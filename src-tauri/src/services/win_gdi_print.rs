@@ -99,8 +99,8 @@ fn print_raw_bytes(printer_name: &str, data: &[u8]) -> Result<(), String> {
         OpenPrinterW(PCWSTR(name_w.as_ptr()), &mut handle, None)
             .map_err(|e| format!("OpenPrinter « {printer_name} »: {e}"))?;
 
-        let mut doc_name = std::ffi::CString::new("Recu NDIMBELENTE").unwrap();
-        let mut datatype = std::ffi::CString::new("RAW").unwrap();
+        let doc_name = std::ffi::CString::new("Recu NDIMBELENTE").unwrap();
+        let datatype = std::ffi::CString::new("RAW").unwrap();
         let mut doc_info = DOC_INFO_1A {
             pDocName: PSTR(doc_name.as_ptr() as *mut u8),
             pOutputFile: PSTR::null(),

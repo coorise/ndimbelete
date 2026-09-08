@@ -85,6 +85,7 @@ impl ReceiptContext {
             .replace("{{COTISATION.DAY}}", &self.day)
             .replace("{{COTISATION.MONTH}}", &self.month)
             .replace("{{COTISATION.YEAR}}", &self.year)
+            .replace("{{COTISATION.PERIOD}}", &self.period_label)
             .replace("{{RECEIVED_AMOUNT}}", &self.received_amount)
             .replace("{{REMAINING_DEBT}}", &self.previous_debt)
             .replace("{{PREVIOUS_DEBT}}", &self.previous_debt)

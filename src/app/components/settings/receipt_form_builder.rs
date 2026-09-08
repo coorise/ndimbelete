@@ -1,7 +1,6 @@
 //! Visual form-builder canvas for receipt field lines (drag reorder + palette).
 
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
 use web_sys::DragEvent;
 
 use crate::app::lib::ReceiptField;

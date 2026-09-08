@@ -13,14 +13,6 @@ pub enum TableLoadMode {
 }
 
 impl TableLoadMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::Paginated => "page",
-            Self::Lazy => "lazy",
-        }
-    }
-
     pub fn from_str(s: &str) -> Self {
         match s {
             "page" => Self::Paginated,

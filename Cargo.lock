@@ -2945,7 +2945,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "ndimbelente"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "ndimbelente-ui"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "console_error_panic_hook",

@@ -101,18 +101,6 @@ struct RecordPaymentArg<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MemberDebtArg<'a> {
-    member_id: &'a str,
-    year: i32,
-}
-
-#[derive(Serialize)]
-struct PathArg<'a> {
-    path: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct PreviewExcelArg<'a> {
     path: &'a str,
     sheet_name: Option<&'a str>,
@@ -308,10 +296,6 @@ pub async fn list_members() -> Result<Vec<Member>, String> {
     invoke("list_members", Empty {}).await
 }
 
-pub async fn get_member(id: &str) -> Result<Member, String> {
-    invoke("get_member", IdArg { id }).await
-}
-
 pub async fn create_member(input: CreateMemberInput) -> Result<Member, String> {
     invoke("create_member", InputArg { input }).await
 }
@@ -324,19 +308,11 @@ pub async fn search_members(query: &str) -> Result<Vec<Member>, String> {
     invoke("search_members", QueryArg { query }).await
 }
 
-pub async fn delete_member(id: &str) -> Result<(), String> {
-    invoke_unit("delete_member", IdArg { id }).await
-}
-
 pub async fn delete_members(ids: Vec<String>) -> Result<usize, String> {
     invoke("delete_members", IdsArg { ids }).await
 }
 
 // —— Cotisations ——
-
-pub async fn list_years() -> Result<Vec<ContributionYear>, String> {
-    invoke("list_years", Empty {}).await
-}
 
 pub async fn ensure_year(year: i32) -> Result<ContributionYear, String> {
     invoke("ensure_year", YearArg { year }).await
@@ -364,10 +340,6 @@ pub async fn record_payment(
         },
     )
     .await
-}
-
-pub async fn get_member_debt(member_id: &str, year: i32) -> Result<MemberDebtSummary, String> {
-    invoke("get_member_debt", MemberDebtArg { member_id, year }).await
 }
 
 pub async fn get_member_debt_as_of(
@@ -549,11 +521,6 @@ pub async fn pick_save_file(default_name: &str) -> Option<String> {
     .await
     .ok()
     .flatten()
-}
-
-/// Alias kept for call sites that previously used the JS dialog.
-pub async fn pick_save_path(default_path: &str) -> Option<String> {
-    pick_save_file(default_path).await
 }
 
 // —— Desktop print ——

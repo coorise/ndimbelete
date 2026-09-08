@@ -15,16 +15,15 @@ pub const PERMISSION_OPTIONS: &[(&str, &str)] = &[
     ("staff:write", "Personnel — écriture"),
 ];
 
-pub fn permissions_to_json(selected: &[String]) -> String {
+pub fn normalize_permissions(selected: &[String]) -> Vec<String> {
     if selected.iter().any(|p| p == "*") {
-        return "[\"*\"]".into();
+        return vec!["*".into()];
     }
-    let parts: Vec<String> = selected
+    selected
         .iter()
         .filter(|p| !p.is_empty())
-        .map(|p| format!("\"{p}\""))
-        .collect();
-    format!("[{}]", parts.join(","))
+        .cloned()
+        .collect()
 }
 
 pub fn parse_permissions_list(raw: &str) -> Vec<String> {

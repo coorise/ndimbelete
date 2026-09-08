@@ -10,7 +10,7 @@ use crate::app::components::ui::{
 use crate::app::hooks::use_table_fullscreen;
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
-    api, parse_permissions_list, CreateRoleInput, CreateStaffInput, Role, Staff,
+    api, parse_permissions_list, normalize_permissions, CreateRoleInput, CreateStaffInput, Role, Staff,
     UpdateRoleInput, UpdateStaffInput, PERMISSION_OPTIONS,
 };
 
@@ -858,10 +858,7 @@ fn RolesTab(
                     </Show>
                     <Button on_click=Callback::new(move |_| {
                         spawn_local(async move {
-                            let mut perms = selected_permissions.get_untracked();
-                            if perms.iter().any(|p| p == "*") {
-                                perms = vec!["*".into()];
-                            }
+                            let perms = normalize_permissions(&selected_permissions.get_untracked());
                             if perms.is_empty() {
                                 form_error.set(Some("Sélectionnez au moins une permission.".into()));
                                 return;

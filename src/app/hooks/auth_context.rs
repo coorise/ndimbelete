@@ -29,10 +29,6 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    pub fn is_authenticated(self) -> bool {
-        self.session.with(|s| s.is_some())
-    }
-
     /// Load session from the Tauri backend (restored from disk on app start).
     pub fn refresh(self) {
         self.loading.set(true);

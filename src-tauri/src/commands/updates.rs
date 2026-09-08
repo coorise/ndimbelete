@@ -48,7 +48,6 @@ struct GhRelease {
 struct GhAsset {
     name: String,
     browser_download_url: String,
-    content_type: Option<String>,
 }
 
 fn normalize_version(tag: &str) -> String {
