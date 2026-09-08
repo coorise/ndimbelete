@@ -1,0 +1,11 @@
+/dist/
+/target/
+src-tauri/target/
+node_modules/
+*.log
+.DS_Store
+.samples/
+.releases/github/main/*
+.releases/github/dev/*
+!.releases/github/main/.gitkeep
+!.releases/github/dev/.gitkeep

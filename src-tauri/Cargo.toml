@@ -1,0 +1,45 @@
+[package]
+name = "ndimbelente"
+version = "0.1.0"
+description = "Ndimbelente — association cotisation management (Tauri backend)"
+authors = ["Ndimbelente"]
+edition = "2021"
+
+[lib]
+name = "ndimbelente_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-mcp-bridge = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+argon2 = { version = "0.5", features = ["std"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+thiserror = "2"
+anyhow = "1"
+directories = "5"
+calamine = { version = "0.26", features = ["dates"] }
+rust_xlsxwriter = "0.79"
+printpdf = "0.7"
+dirs = "5"
+parking_lot = "0.12"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+  "Win32_Storage_Xps",
+] }

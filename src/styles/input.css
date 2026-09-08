@@ -1,0 +1,269 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --brand-green: #0b7a3e;
+  --brand-red: #ce1126;
+  --brand-yellow: #f5d76e;
+  --brand: var(--brand-green);
+  --bg: #f7f3ea;
+  --bg-elevated: #fffdf8;
+  --fg: #1a1f1c;
+  --muted: #5c6b62;
+  --border: #d9d0bf;
+  --surface: rgba(255, 253, 248, 0.92);
+  --shadow: 0 18px 40px rgba(26, 31, 28, 0.08);
+  --radius: 0.75rem;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Source Sans 3", "Segoe UI", sans-serif;
+  --tap-min: 44px;
+}
+
+html.dark {
+  --bg: #0f1612;
+  --bg-elevated: #17201a;
+  --fg: #f3f0e7;
+  --muted: #a7b5ac;
+  --border: #2c3a32;
+  --surface: rgba(23, 32, 26, 0.94);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: calc(16px * var(--font-scale, 1));
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--fg);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--brand-yellow) 35%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--brand-green) 18%, transparent), transparent 55%),
+    linear-gradient(165deg, var(--bg), color-mix(in srgb, var(--bg) 86%, var(--brand-yellow)));
+  background-attachment: fixed;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--brand-green) 18%, transparent) 1px, transparent 0);
+  background-size: 22px 22px;
+  z-index: -1;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.brand-logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  max-width: 2.25rem;
+  max-height: 2.25rem;
+  object-fit: contain;
+}
+
+.brand-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+
+.tap-target {
+  min-height: var(--tap-min);
+  min-width: var(--tap-min);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.7s ease-out both;
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 4s ease-in-out infinite;
+}
+
+/* Horizontal table scroll — top rail + body share the same thumb styling */
+.table-h-scroll {
+  overflow-x: scroll;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: color-mix(in srgb, var(--brand) 55%, #888) color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.table-h-scroll-top {
+  max-height: 18px;
+  border-bottom: none;
+}
+.table-h-scroll-body {
+  /* hide duplicate bottom scrollbar visual weight slightly thinner ok */
+}
+.table-h-scroll::-webkit-scrollbar {
+  height: 14px;
+}
+.table-h-scroll::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-radius: 0.75rem;
+}
+.table-h-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--brand) 55%, #777);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.table-h-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--brand);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.table-pagination-bar {
+  background-color: var(--bg-elevated) !important;
+  opacity: 1 !important;
+}
+
+.receipt-screen-preview {
+  color: #000;
+  background: #fff;
+}
+.receipt-screen-mini {
+  width: 58mm;
+  max-width: 58mm;
+  min-height: 80mm;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+.receipt-screen-a4 {
+  width: 210mm;
+  max-width: min(210mm, 100%);
+  min-height: 120mm;
+  box-sizing: border-box;
+}
+
+/* Keep a print-only clone off-screen (but in DOM) so WebView2 can print dimensions correctly */
+@media screen {
+  #receipt-print-area {
+    position: absolute !important;
+    left: -10000px !important;
+    top: 0 !important;
+    pointer-events: none !important;
+  }
+}
+
+/* Print: hide app chrome; show only the receipt with correct dimensions */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #receipt-print-area,
+  #receipt-print-area * {
+    visibility: visible !important;
+  }
+
+  .no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  #receipt-print-area.receipt-print {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    z-index: 99999 !important;
+  }
+
+  #receipt-print-area.receipt-mini {
+    width: 58mm !important;
+    max-width: 58mm !important;
+    font-size: 11px !important;
+  }
+
+  #receipt-print-area.receipt-a4 {
+    width: 186mm !important; /* A4 content width with ~12mm margins */
+    max-width: 186mm !important;
+    font-size: 14px !important;
+  }
+
+  /* Avoid WebView chrome / modal overlays covering the preview */
+  [role="dialog"] {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [role="dialog"] > div {
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+}
