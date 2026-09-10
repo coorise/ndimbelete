@@ -677,7 +677,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                             <p class="font-semibold">{format!("{:.2} €", total)}</p>
                                         </div>
                                         <div>
-                                            <p class="text-[var(--muted)]">"Solde / dette"</p>
+                                            <p class="text-[var(--muted)]">"Dette"</p>
                                             <p class=move || {
                                                 if balance > 0.001 {
                                                     "font-semibold text-[var(--brand-red)]"
@@ -877,7 +877,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                 class="cursor-pointer"
                                 on_click=Callback::new(move |_| toggle_sort(SortKey::Balance))
                             >
-                                {format!("SOLDE{}", sort_arrow(sk == SortKey::Balance, asc))}
+                                {format!("DETTE{}", sort_arrow(sk == SortKey::Balance, asc))}
                             </Th>
                             <Th sticky=true>{move || i18n.t("common.actions")}</Th>
                         </THead>
@@ -1114,7 +1114,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                         {format!("{} {} ({})", r.member.last_name, r.member.first_name, r.member.card_number)}
                                     </p>
                                     <p>"Statut : " <strong>{r.member.status.clone()}</strong></p>
-                                    <p>"Solde : " <strong>{money(r.balance)} " €"</strong></p>
+                                    <p>"Dette : " <strong>{money(r.balance)} " €"</strong></p>
                                     <p class="text-[var(--muted)]">
                                         "Total payé : " {money(r.total_paid)} " € — Dette préc. : "
                                         {money(r.prior_december_debt)} " € — Ristourne : " {money(r.ristourne)} " €"

@@ -3,7 +3,7 @@
 use rusqlite::params;
 use tauri::State;
 
-use crate::db::seed_year;
+use crate::db::{map_member, seed_year, MEMBER_SELECT};
 use crate::models::{
     ContributionYear, Member, MemberDebtSummary, YearGrid, YearGridRow,
 };
@@ -15,27 +15,6 @@ use crate::services::cotisation_engine::{
     update_year_monthly_amount,
 };
 use crate::state::AppState;
-
-fn map_member(row: &rusqlite::Row<'_>) -> rusqlite::Result<Member> {
-    Ok(Member {
-        id: row.get(0)?,
-        card_number: row.get(1)?,
-        last_name: row.get(2)?,
-        first_name: row.get(3)?,
-        adhesion_fee: row.get(4)?,
-        address: row.get(5)?,
-        address_complement: row.get(6)?,
-        postal_code: row.get(7)?,
-        city: row.get(8)?,
-        phone: row.get(9)?,
-        email: row.get(10)?,
-        bank_transfer_status: row.get(11)?,
-        status: row.get(12)?,
-        notes: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-    })
-}
 
 #[tauri::command]
 pub fn list_years(state: State<'_, AppState>) -> Result<Vec<ContributionYear>, String> {
@@ -102,12 +81,12 @@ pub fn get_year_grid(state: State<'_, AppState>, year: i32) -> Result<YearGrid, 
     let periods = load_periods(&conn, &year_row.id)?;
 
     let mut members_stmt = conn
-        .prepare(
-            "SELECT id, card_number, last_name, first_name, adhesion_fee,
-                    address, address_complement, postal_code, city, phone, email,
-                    bank_transfer_status, status, notes, created_at, updated_at
-             FROM members ORDER BY last_name, first_name",
-        )
+        .prepare(&format!(
+            "SELECT {MEMBER_SELECT}
+             FROM members m
+             LEFT JOIN member_roles mr ON mr.id = m.member_role_id
+             ORDER BY m.last_name, m.first_name"
+        ))
         .map_err(|e| e.to_string())?;
 
     let members: Vec<Member> = members_stmt
@@ -128,10 +107,12 @@ pub fn get_year_grid(state: State<'_, AppState>, year: i32) -> Result<YearGrid, 
         // Re-read member status after demissionnaire recalc
         let member = conn
             .query_row(
-                "SELECT id, card_number, last_name, first_name, adhesion_fee,
-                        address, address_complement, postal_code, city, phone, email,
-                        bank_transfer_status, status, notes, created_at, updated_at
-                 FROM members WHERE id = ?1",
+                &format!(
+                    "SELECT {MEMBER_SELECT}
+                     FROM members m
+                     LEFT JOIN member_roles mr ON mr.id = m.member_role_id
+                     WHERE m.id = ?1"
+                ),
                 [&member.id],
                 map_member,
             )

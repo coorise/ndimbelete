@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS staff (
     recovery_color_hash TEXT
 );
 
+CREATE TABLE IF NOT EXISTS member_roles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    permissions_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS members (
     id TEXT PRIMARY KEY,
     card_number TEXT NOT NULL UNIQUE,
@@ -48,6 +55,8 @@ CREATE TABLE IF NOT EXISTS members (
     bank_transfer_status TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     notes TEXT,
+    member_role_id TEXT REFERENCES member_roles(id),
+    payment_method TEXT NOT NULL DEFAULT 'cash',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -186,6 +195,26 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "ALTER TABLE staff ADD COLUMN last_name TEXT NOT NULL DEFAULT '';")?;
     backfill_staff_names(conn)?;
 
+    // Member roles + payment method (Excel VIREMENT BANQUAIRE split).
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS member_roles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            permissions_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE members ADD COLUMN member_role_id TEXT REFERENCES member_roles(id);",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE members ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash';",
+    )?;
+    seed_member_roles(conn)?;
+    backfill_member_roles_from_virement(conn)?;
+
     // Backfill meeting dates / collect times / sort_order for existing periods.
     backfill_planning_defaults(conn)?;
 
@@ -196,6 +225,114 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         seed_year(conn, 2026)?;
     }
 
+    Ok(())
+}
+
+fn seed_member_roles(conn: &Connection) -> Result<()> {
+    use crate::models::{
+        MEMBER_PERM_CAN_PAY, MEMBER_PERM_PAY_BANK, MEMBER_PERM_PAY_CASH, NORMAL_MEMBER_ROLE,
+    };
+
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM member_roles", [], |r| r.get(0))?;
+    if count > 0 {
+        return Ok(());
+    }
+    let now = now_iso();
+    let normal_perms = serde_json::to_string(&[
+        MEMBER_PERM_CAN_PAY,
+        MEMBER_PERM_PAY_CASH,
+        MEMBER_PERM_PAY_BANK,
+    ])?;
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO member_roles (id, name, permissions_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, NORMAL_MEMBER_ROLE, normal_perms, now],
+    )?;
+    Ok(())
+}
+
+fn ensure_member_role_named(conn: &Connection, name: &str, permissions_json: &str) -> Result<String> {
+    let existing: Result<String, _> = conn.query_row(
+        "SELECT id FROM member_roles WHERE LOWER(name) = LOWER(?1)",
+        [name],
+        |r| r.get(0),
+    );
+    match existing {
+        Ok(id) => Ok(id),
+        Err(_) => {
+            let id = Uuid::new_v4().to_string();
+            let now = now_iso();
+            conn.execute(
+                "INSERT INTO member_roles (id, name, permissions_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, name, permissions_json, now],
+            )?;
+            Ok(id)
+        }
+    }
+}
+
+fn backfill_member_roles_from_virement(conn: &Connection) -> Result<()> {
+    use crate::models::{
+        reconstruct_virement_cell, DEFAULT_VIREMENT_ROLE_VALUES, NORMAL_MEMBER_ROLE,
+        PAYMENT_METHOD_BANK, PAYMENT_METHOD_CASH, PAYMENT_METHOD_NONE,
+    };
+
+    let normal_id = ensure_member_role_named(
+        conn,
+        NORMAL_MEMBER_ROLE,
+        &serde_json::to_string(&[
+            crate::models::MEMBER_PERM_CAN_PAY,
+            crate::models::MEMBER_PERM_PAY_CASH,
+            crate::models::MEMBER_PERM_PAY_BANK,
+        ])?,
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, bank_transfer_status, member_role_id, payment_method FROM members",
+    )?;
+    let rows: Vec<(String, Option<String>, Option<String>, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get::<_, String>(3).unwrap_or_else(|_| PAYMENT_METHOD_CASH.into()),
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    for (id, status, role_id, _pm) in rows {
+        if role_id.is_some() {
+            continue;
+        }
+        let raw = status.as_deref().unwrap_or("").trim();
+        let (role_id, payment_method, role_name) = if raw.is_empty() {
+            (normal_id.clone(), PAYMENT_METHOD_CASH, NORMAL_MEMBER_ROLE)
+        } else if raw.eq_ignore_ascii_case("VIREMENT") {
+            (normal_id.clone(), PAYMENT_METHOD_BANK, NORMAL_MEMBER_ROLE)
+        } else if DEFAULT_VIREMENT_ROLE_VALUES
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(raw))
+        {
+            let rid = ensure_member_role_named(conn, raw, "[]")?;
+            (rid, PAYMENT_METHOD_NONE, raw)
+        } else {
+            // Unknown flag → treat as role without payment obligation.
+            let rid = ensure_member_role_named(conn, raw, "[]")?;
+            (rid, PAYMENT_METHOD_NONE, raw)
+        };
+        let excel_cell = reconstruct_virement_cell(role_name, payment_method);
+        let excel_opt = if excel_cell.is_empty() {
+            None
+        } else {
+            Some(excel_cell)
+        };
+        conn.execute(
+            "UPDATE members SET member_role_id=?1, payment_method=?2, bank_transfer_status=?3 WHERE id=?4",
+            rusqlite::params![role_id, payment_method, excel_opt, id],
+        )?;
+    }
     Ok(())
 }
 

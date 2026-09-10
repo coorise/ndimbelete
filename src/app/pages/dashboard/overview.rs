@@ -2,7 +2,7 @@ use chrono::Datelike;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::app::components::ui::{Card, Select, SelectOption};
+use crate::app::components::ui::{Card, SearchableSelect, SelectOption};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
     api, DebtVsPaidPoint, Member, OverviewStats, PaymentStatusSlice, PeriodSeriesPoint,
@@ -121,12 +121,14 @@ pub fn OverviewPage() -> impl IntoView {
                             }
                         />
                     </label>
-                    <Select
+                    <SearchableSelect
                         label="Membre"
                         options=member_options
                         value=member_id.into()
                         on_change=Callback::new(move |v| member_id.set(v))
                         class="min-w-[16rem] w-72 max-w-full"
+                        placeholder="Tous les membres"
+                        search_placeholder="Nom ou n° carte…"
                     />
                 </div>
             </div>

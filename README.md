@@ -4,6 +4,25 @@ Application desktop hors ligne pour la gestion des cotisations de l’**Associat
 
 Stack : **Tauri 2** + **Leptos (CSR)** + **SQLite** + **Tailwind CSS**.
 
+## Branches & releases
+
+```
+dev  ──push──►  Dev prerelease  (tag dev-vX.Y.Z)
+ │
+ └── PR merge to main ──►  Production release  (tag vX.Y.Z)
+```
+
+1. Work on **`dev`** with the team (`git checkout dev`).
+2. Push to `dev` → GitHub Actions builds a **prerelease**.
+3. When ready, open a **Pull Request** `dev` → `main`.
+4. After merge, Actions builds the **production** release (not on the same push as `dev`).
+
+Do **not** push the same commit to both branches. `main` is for merges only.
+
+App update channel:
+- Production builds check non-prerelease GitHub releases.
+- Dev builds check prereleases (`dev-v*` tags).
+
 ## Prérequis
 
 - [Rust](https://www.rust-lang.org/) (stable)

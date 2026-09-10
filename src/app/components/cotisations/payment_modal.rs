@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::app::components::ui::{
-    Button, ButtonVariant, Input, Modal, Select, SelectOption,
+    Button, ButtonVariant, Input, Modal, SearchableSelect, Select, SelectOption,
 };
 use crate::app::lib::{api, Member, MemberDebtSummary, PaymentReceipt};
 
@@ -154,7 +154,7 @@ pub fn PaymentModal(
             on_close=Callback::new(move |_| open.set(false))
         >
             <div class="flex flex-col gap-4">
-                <Select
+                <SearchableSelect
                     label="Membre"
                     options=member_options
                     value=member_id.into()
@@ -162,6 +162,9 @@ pub fn PaymentModal(
                         amount.set(String::new());
                         member_id.set(v);
                     })
+                    class="w-full"
+                    placeholder="Choisir un membre…"
+                    search_placeholder="Nom ou n° carte…"
                 />
                 <Show
                     when=move || is_edit.get() && !periods_signal.get().is_empty()
