@@ -112,6 +112,18 @@ struct ImportExcelArg<'a> {
     path: &'a str,
     sheet_name: &'a str,
     year: i32,
+    role_values: Option<&'a [String]>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportExcelGridArg<'a> {
+    headers: &'a [String],
+    rows: &'a [Vec<String>],
+    year: i32,
+    sheet_label: Option<&'a str>,
+    role_values: Option<&'a [String]>,
+    prune_missing: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -290,6 +302,20 @@ pub async fn update_role(input: UpdateRoleInput) -> Result<Role, String> {
     invoke("update_role", InputArg { input }).await
 }
 
+// —— Member roles ——
+
+pub async fn list_member_roles() -> Result<Vec<MemberRole>, String> {
+    invoke("list_member_roles", Empty {}).await
+}
+
+pub async fn create_member_role(input: CreateMemberRoleInput) -> Result<MemberRole, String> {
+    invoke("create_member_role", InputArg { input }).await
+}
+
+pub async fn update_member_role(input: UpdateMemberRoleInput) -> Result<MemberRole, String> {
+    invoke("update_member_role", InputArg { input }).await
+}
+
 // —— Members ——
 
 pub async fn list_members() -> Result<Vec<Member>, String> {
@@ -464,6 +490,7 @@ pub async fn import_excel(
     path: &str,
     sheet_name: &str,
     year: i32,
+    role_values: Option<&[String]>,
 ) -> Result<ImportResult, String> {
     invoke(
         "import_excel",
@@ -471,6 +498,29 @@ pub async fn import_excel(
             path,
             sheet_name,
             year,
+            role_values,
+        },
+    )
+    .await
+}
+
+pub async fn import_excel_grid(
+    headers: &[String],
+    rows: &[Vec<String>],
+    year: i32,
+    sheet_label: Option<&str>,
+    role_values: Option<&[String]>,
+    prune_missing: bool,
+) -> Result<ImportResult, String> {
+    invoke(
+        "import_excel_grid",
+        ImportExcelGridArg {
+            headers,
+            rows,
+            year,
+            sheet_label,
+            role_values,
+            prune_missing: Some(prune_missing),
         },
     )
     .await

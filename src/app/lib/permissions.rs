@@ -15,6 +15,13 @@ pub const PERMISSION_OPTIONS: &[(&str, &str)] = &[
     ("staff:write", "Personnel — écriture"),
 ];
 
+/// Association member-role permissions (Excel VIREMENT BANQUAIRE split).
+pub const MEMBER_ROLE_PERMISSION_OPTIONS: &[(&str, &str)] = &[
+    ("member:can_pay", "Membre peut payer"),
+    ("member:pay_bank_transfer", "Paie par virement bancaire"),
+    ("member:pay_cash", "Paie en espèces"),
+];
+
 pub fn normalize_permissions(selected: &[String]) -> Vec<String> {
     if selected.iter().any(|p| p == "*") {
         return vec!["*".into()];
@@ -43,4 +50,12 @@ pub fn parse_permissions_list(raw: &str) -> Vec<String> {
             .filter(|s| !s.is_empty())
             .collect()
     }
+}
+
+pub fn member_permission_label(key: &str) -> String {
+    MEMBER_ROLE_PERMISSION_OPTIONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, l)| (*l).to_string())
+        .unwrap_or_else(|| key.to_string())
 }

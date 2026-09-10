@@ -20,9 +20,38 @@ pub fn import_excel(
     path: String,
     sheet_name: String,
     year: i32,
+    role_values: Option<Vec<String>>,
 ) -> Result<ImportResult, String> {
     let conn = state.db.lock();
-    excel_import::import_excel(&conn, &path, &sheet_name, year)
+    let roles = role_values.unwrap_or_else(|| {
+        crate::models::DEFAULT_VIREMENT_ROLE_VALUES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    });
+    excel_import::import_excel(&conn, &path, &sheet_name, year, &roles)
+}
+
+#[tauri::command]
+pub fn import_excel_grid(
+    state: State<'_, AppState>,
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+    year: i32,
+    sheet_label: Option<String>,
+    role_values: Option<Vec<String>>,
+    prune_missing: Option<bool>,
+) -> Result<ImportResult, String> {
+    let conn = state.db.lock();
+    let roles = role_values.unwrap_or_else(|| {
+        crate::models::DEFAULT_VIREMENT_ROLE_VALUES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    });
+    let label = sheet_label.unwrap_or_default();
+    let prune = prune_missing.unwrap_or(true);
+    excel_import::import_excel_grid(&conn, &headers, &rows, year, &label, &roles, prune)
 }
 
 #[tauri::command]

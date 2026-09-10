@@ -20,16 +20,37 @@ use crate::services::cotisation_engine::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VirementValueCount {
+    pub value: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExcelPreview {
     pub sheets: Vec<String>,
     pub sample_rows: Vec<Vec<String>>,
     pub headers: Vec<String>,
+    /// Sheet that was actually read for headers / rows.
+    #[serde(default)]
+    pub selected_sheet: String,
+    /// True when a VIREMENT BANQUAIRE-like column is present.
+    #[serde(default)]
+    pub has_virement_column: bool,
+    /// Distinct non-empty values found in that column (for role mapping UI).
+    #[serde(default)]
+    pub virement_values: Vec<VirementValueCount>,
+    /// Count of empty cells (cash / Normal) in the virement column.
+    #[serde(default)]
+    pub virement_empty_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportFailure {
     pub row: usize,
     pub reason: String,
+    /// Full row cells at failure time (for in-app correction / retry).
+    #[serde(default)]
+    pub cells: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +221,10 @@ pub fn preview_excel(path: &str, sheet_name: Option<String>) -> Result<ExcelPrev
             sheets,
             sample_rows: vec![],
             headers: vec![],
+            selected_sheet: String::new(),
+            has_virement_column: false,
+            virement_values: vec![],
+            virement_empty_count: 0,
         });
     }
 
@@ -214,22 +239,49 @@ pub fn preview_excel(path: &str, sheet_name: Option<String>) -> Result<ExcelPrev
 
     let mut headers = Vec::new();
     let mut sample_rows = Vec::new();
+    let mut value_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut empty_count = 0usize;
+    let mut virement_col: Option<usize> = None;
 
     for (i, row) in range.rows().enumerate() {
         let cells: Vec<String> = row.iter().map(cell_str).collect();
         if i == 0 {
             headers = cells;
-        } else if i <= 6 {
-            sample_rows.push(cells);
+            let header_cells: Vec<Data> = row.to_vec();
+            let cols = map_columns(&header_cells);
+            virement_col = cols.virement;
         } else {
-            break;
+            // Keep every data row for editable preview / search.
+            if !cells.iter().all(|c| c.trim().is_empty()) {
+                sample_rows.push(cells.clone());
+            }
+            if let Some(ci) = virement_col {
+                let raw = cells.get(ci).cloned().unwrap_or_default();
+                let t = raw.trim();
+                if t.is_empty() {
+                    empty_count += 1;
+                } else {
+                    *value_counts.entry(t.to_string()).or_insert(0) += 1;
+                }
+            }
         }
     }
+
+    let mut virement_values: Vec<VirementValueCount> = value_counts
+        .into_iter()
+        .map(|(value, count)| VirementValueCount { value, count })
+        .collect();
+    virement_values.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
 
     Ok(ExcelPreview {
         sheets,
         sample_rows,
         headers,
+        selected_sheet: target,
+        has_virement_column: virement_col.is_some(),
+        virement_values,
+        virement_empty_count: empty_count,
     })
 }
 
@@ -406,6 +458,7 @@ pub fn import_excel(
     path: &str,
     sheet_name: &str,
     year: i32,
+    role_values: &[String],
 ) -> Result<ImportResult, String> {
     let mut workbook = open_workbook_auto(path).map_err(|e| format!("Cannot open Excel: {e}"))?;
     let range = workbook
@@ -455,6 +508,7 @@ pub fn import_excel(
         if is_summary_row(row, &cols) {
             continue;
         }
+        let cells: Vec<String> = row.iter().map(cell_str).collect();
         let card = get_str(row, cols.carte);
         if card.is_empty() {
             let nom = get_str(row, cols.nom);
@@ -464,6 +518,7 @@ pub fn import_excel(
             failed.push(ImportFailure {
                 row: excel_row,
                 reason: "Missing N°CARTE".into(),
+                cells,
             });
             continue;
         }
@@ -477,6 +532,7 @@ pub fn import_excel(
             &periods,
             base_due,
             monthly,
+            role_values,
         ) {
             Ok(()) => {
                 ok += 1;
@@ -485,6 +541,7 @@ pub fn import_excel(
             Err(reason) => failed.push(ImportFailure {
                 row: excel_row,
                 reason,
+                cells,
             }),
         }
     }
@@ -499,6 +556,144 @@ pub fn import_excel(
     let removed = prune_members_not_in_import(conn, &seen_list)?;
 
     // Final pass: rebuild dues + restore demissionnaire → active where appropriate
+    let _ = crate::services::cotisation_engine::recalculate_all_members(conn, &year_id);
+
+    Ok(ImportResult {
+        ok,
+        failed,
+        removed,
+    })
+}
+
+fn strings_to_data_row(cells: &[String]) -> Vec<Data> {
+    cells
+        .iter()
+        .map(|c| {
+            let t = c.trim();
+            if t.is_empty() {
+                Data::Empty
+            } else if let Ok(i) = t.parse::<i64>() {
+                Data::Int(i)
+            } else if let Ok(f) = t.replace(',', ".").parse::<f64>() {
+                Data::Float(f)
+            } else {
+                Data::String(c.clone())
+            }
+        })
+        .collect()
+}
+
+fn map_columns_from_headers(headers: &[String]) -> ColMap {
+    let data: Vec<Data> = headers
+        .iter()
+        .map(|h| Data::String(h.clone()))
+        .collect();
+    map_columns(&data)
+}
+
+/// Import from an editable grid (preview corrections / failure retries).
+/// When `prune_missing` is true, members absent from `rows` are removed (full sheet sync).
+pub fn import_excel_grid(
+    conn: &Connection,
+    headers: &[String],
+    rows: &[Vec<String>],
+    year: i32,
+    sheet_label: &str,
+    role_values: &[String],
+    prune_missing: bool,
+) -> Result<ImportResult, String> {
+    if headers.is_empty() {
+        return Err("En-têtes manquants".into());
+    }
+    let cols = map_columns_from_headers(headers);
+    if cols.carte.is_none() {
+        return Err("Could not find N°CARTE column in sheet headers".into());
+    }
+
+    let year_id = seed_year(conn, year).map_err(|e| e.to_string())?;
+    let monthly: f64 = conn
+        .query_row(
+            "SELECT monthly_amount FROM contribution_years WHERE id = ?1",
+            [&year_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let base_due = period_due_base(monthly);
+
+    let periods: Vec<(String, i32)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, period_month FROM contribution_periods WHERE year_id = ?1 ORDER BY period_month",
+            )
+            .map_err(|e| e.to_string())?;
+        let r = stmt
+            .query_map([&year_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        r.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    let mut ok = 0usize;
+    let mut failed = Vec::new();
+    let mut seen_cards: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (row_idx, cells) in rows.iter().enumerate() {
+        let excel_row = row_idx + 2;
+        let data = strings_to_data_row(cells);
+        if is_summary_row(&data, &cols) {
+            continue;
+        }
+        let card = get_str(&data, cols.carte);
+        if card.is_empty() {
+            let nom = get_str(&data, cols.nom);
+            if nom.is_empty() && get_str(&data, cols.prenom).is_empty() {
+                continue;
+            }
+            failed.push(ImportFailure {
+                row: excel_row,
+                reason: "Missing N°CARTE".into(),
+                cells: cells.clone(),
+            });
+            continue;
+        }
+
+        match import_one_row(
+            conn,
+            &data,
+            &cols,
+            &card,
+            &year_id,
+            &periods,
+            base_due,
+            monthly,
+            role_values,
+        ) {
+            Ok(()) => {
+                ok += 1;
+                seen_cards.insert(card);
+            }
+            Err(reason) => failed.push(ImportFailure {
+                row: excel_row,
+                reason,
+                cells: cells.clone(),
+            }),
+        }
+    }
+
+    if !sheet_label.trim().is_empty() {
+        let _ = conn.execute(
+            "UPDATE contribution_years SET sheet_label = ?1 WHERE id = ?2",
+            params![sheet_label, year_id],
+        );
+    }
+
+    let removed = if prune_missing {
+        let seen_list: Vec<String> = seen_cards.into_iter().collect();
+        prune_members_not_in_import(conn, &seen_list)?
+    } else {
+        0
+    };
+
     let _ = crate::services::cotisation_engine::recalculate_all_members(conn, &year_id);
 
     Ok(ImportResult {
@@ -558,6 +753,7 @@ fn import_one_row(
     periods: &[(String, i32)],
     base_due: f64,
     monthly: f64,
+    role_values: &[String],
 ) -> Result<(), String> {
     let last_name = get_str(row, cols.nom);
     let first_name = get_str(row, cols.prenom);
@@ -569,14 +765,9 @@ fn import_one_row(
     let prior_debt = get_opt_f64(row, cols.dette_prev).unwrap_or(0.0);
     let ristourne = get_opt_f64(row, cols.ristourne).unwrap_or(0.0);
     let dec_debt = get_opt_f64(row, cols.dette_year).unwrap_or(0.0);
-    let virement = {
-        let v = get_str(row, cols.virement);
-        if v.is_empty() {
-            None
-        } else {
-            Some(v)
-        }
-    };
+    let virement_raw = get_str(row, cols.virement);
+    let (member_role_id, payment_method, virement) =
+        crate::db::map_virement_cell(conn, &virement_raw, role_values)?;
     let address = nonempty(get_str(row, cols.adresse));
     let complement = nonempty(get_str(row, cols.complement));
     let cp = nonempty(get_str(row, cols.cp));
@@ -596,8 +787,9 @@ fn import_one_row(
             conn.execute(
                 "UPDATE members SET last_name=?1, first_name=?2, adhesion_fee=?3,
                  address=?4, address_complement=?5, postal_code=?6, city=?7,
-                 phone=?8, email=?9, bank_transfer_status=?10, updated_at=?11
-                 WHERE id=?12",
+                 phone=?8, email=?9, bank_transfer_status=?10, member_role_id=?11,
+                 payment_method=?12, updated_at=?13
+                 WHERE id=?14",
                 params![
                     last_name,
                     first_name,
@@ -609,6 +801,8 @@ fn import_one_row(
                     phone,
                     email,
                     virement,
+                    member_role_id,
+                    payment_method,
                     now,
                     id,
                 ],
@@ -622,11 +816,25 @@ fn import_one_row(
                 "INSERT INTO members (
                     id, card_number, last_name, first_name, adhesion_fee,
                     address, address_complement, postal_code, city, phone, email,
-                    bank_transfer_status, status, notes, created_at, updated_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',NULL,?13,?13)",
+                    bank_transfer_status, status, notes, member_role_id, payment_method,
+                    created_at, updated_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',NULL,?13,?14,?15,?15)",
                 params![
-                    id, card, last_name, first_name, adhesion, address, complement, cp, ville,
-                    phone, email, virement, now
+                    id,
+                    card,
+                    last_name,
+                    first_name,
+                    adhesion,
+                    address,
+                    complement,
+                    cp,
+                    ville,
+                    phone,
+                    email,
+                    virement,
+                    member_role_id,
+                    payment_method,
+                    now
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -718,6 +926,10 @@ mod tests {
             sample_path().to_str().unwrap(),
             "2026",
             2026,
+            &crate::models::DEFAULT_VIREMENT_ROLE_VALUES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
         )
         .expect("import");
         eprintln!("ok={} failed={}", res.ok, res.failed.len());

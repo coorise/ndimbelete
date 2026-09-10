@@ -54,6 +54,9 @@ pub fn run() {
             commands::search_members,
             commands::delete_member,
             commands::delete_members,
+            commands::list_member_roles,
+            commands::create_member_role,
+            commands::update_member_role,
             // Cotisations
             commands::get_year_grid,
             commands::set_monthly_amount,
@@ -77,6 +80,7 @@ pub fn run() {
             // Excel
             commands::preview_excel,
             commands::import_excel,
+            commands::import_excel_grid,
             commands::export_excel,
             // Dialogs
             commands::pick_excel_file,

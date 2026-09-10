@@ -135,6 +135,12 @@ pub struct Member {
     pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub member_role_id: Option<String>,
+    #[serde(default)]
+    pub payment_method: String,
+    #[serde(default)]
+    pub member_role_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -149,8 +155,13 @@ pub struct CreateMemberInput {
     pub city: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
+    #[serde(default)]
     pub bank_transfer_status: Option<String>,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub member_role_id: Option<String>,
+    #[serde(default)]
+    pub payment_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,9 +177,35 @@ pub struct UpdateMemberInput {
     pub city: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
+    #[serde(default)]
     pub bank_transfer_status: Option<String>,
     pub status: String,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub member_role_id: Option<String>,
+    #[serde(default)]
+    pub payment_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemberRole {
+    pub id: String,
+    pub name: String,
+    pub permissions_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateMemberRoleInput {
+    pub name: String,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMemberRoleInput {
+    pub id: String,
+    pub name: String,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -462,16 +499,32 @@ pub struct UpsertPlanningInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VirementValueCount {
+    pub value: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExcelPreview {
     pub sheets: Vec<String>,
     pub sample_rows: Vec<Vec<String>>,
     pub headers: Vec<String>,
+    #[serde(default)]
+    pub selected_sheet: String,
+    #[serde(default)]
+    pub has_virement_column: bool,
+    #[serde(default)]
+    pub virement_values: Vec<VirementValueCount>,
+    #[serde(default)]
+    pub virement_empty_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImportFailure {
     pub row: usize,
     pub reason: String,
+    #[serde(default)]
+    pub cells: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -574,9 +627,7 @@ pub struct UpdateInfo {
     pub message: String,
 }
 
-pub const BANK_TRANSFER_VALUES: &[&str] = &[
-    "",
-    "VIREMENT",
+pub const DEFAULT_VIREMENT_ROLE_VALUES: &[&str] = &[
     "EXEMPTE",
     "Maladie",
     "Commissaire",
@@ -585,4 +636,10 @@ pub const BANK_TRANSFER_VALUES: &[&str] = &[
     "Retraite",
     "TRESORIER",
     "Aide bureaux",
+];
+
+pub const PAYMENT_METHOD_OPTIONS: &[(&str, &str)] = &[
+    ("cash", "Espèces"),
+    ("bank_transfer", "Virement bancaire"),
+    ("none", "Aucun"),
 ];

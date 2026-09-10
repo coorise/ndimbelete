@@ -1,8 +1,9 @@
 //! Excel export — write a year cotisation sheet via rust_xlsxwriter.
-//! Headers match the association import layout (duplicate date columns per period).
+//! Headers match the association import layout (duplicate date columns per period),
+//! with column fills close to the traditional Excel workbook.
 
 use rusqlite::{params, Connection};
-use rust_xlsxwriter::{Format, Workbook};
+use rust_xlsxwriter::{Color, Format, Workbook};
 use serde::{Deserialize, Serialize};
 
 use crate::services::cotisation_engine::{load_period_cells, load_periods};
@@ -23,14 +24,12 @@ fn period_header_date(year: i32, period: &crate::models::ContributionPeriod) -> 
             return format!("{y:04}-{m:02}-{d:02}");
         }
     }
-    // First day of the bi-monthly period month (Excel-like)
     format!("{year:04}-{:02}-01", period.period_month)
 }
 
 fn parse_dmy(s: &str) -> Option<(u32, u32, i32)> {
     let parts: Vec<&str> = s.split(|c| c == '/' || c == '-').collect();
     if parts.len() == 3 {
-        // try DD/MM/YYYY
         if let (Ok(d), Ok(m), Ok(y)) = (
             parts[0].parse::<u32>(),
             parts[1].parse::<u32>(),
@@ -40,7 +39,6 @@ fn parse_dmy(s: &str) -> Option<(u32, u32, i32)> {
                 return Some((d, m, y));
             }
         }
-        // try YYYY-MM-DD
         if let (Ok(y), Ok(m), Ok(d)) = (
             parts[0].parse::<i32>(),
             parts[1].parse::<u32>(),
@@ -72,46 +70,86 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
         .set_name(year.to_string())
         .map_err(|e| e.to_string())?;
 
-    let header_fmt = Format::new().set_bold();
+    let fmt_plain = Format::new().set_bold();
+    let fmt_carte = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0x8B6914))
+        .set_font_color(Color::White);
+    let fmt_adhesion = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xF4B183));
+    let fmt_dette = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xFF0000));
+    let fmt_ristourne = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xED7D31));
+    let fmt_due_hdr = Format::new()
+        .set_bold()
+        .set_background_color(Color::Black)
+        .set_font_color(Color::White);
+    let fmt_paid_hdr = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0x808080))
+        .set_font_color(Color::White);
+    let fmt_total = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0x548235))
+        .set_font_color(Color::White);
+    let fmt_virement = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xD9D9D9));
+    let fmt_adresse = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0x8FAADC));
+    let fmt_compl = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xB4A7D6));
 
-    let mut headers: Vec<String> = vec![
-        "NOM".into(),
-        "PRENOM".into(),
-        "N°CARTE".into(),
-        "cotisation adhesion".into(),
-        format!("DETTE DECEMBRE {}", year - 1),
-        "RISTOURNE".into(),
+    let cell_dette = Format::new().set_background_color(Color::RGB(0xFF0000));
+    let cell_adhesion = Format::new().set_background_color(Color::RGB(0xF4B183));
+    let cell_ristourne = Format::new().set_background_color(Color::RGB(0xED7D31));
+    let cell_total = Format::new().set_background_color(Color::RGB(0xC6EFCE));
+
+    let mut headers: Vec<(String, Format)> = vec![
+        ("NOM".into(), fmt_plain.clone()),
+        ("PRENOM".into(), fmt_plain.clone()),
+        ("N°CARTE".into(), fmt_carte),
+        ("cotisation adhesion".into(), fmt_adhesion),
+        (format!("DETTE DECEMBRE {}", year - 1), fmt_dette.clone()),
+        ("RISTOURNE séjour Sénégal ou Maladie".into(), fmt_ristourne),
     ];
     for p in &periods {
         let date_h = period_header_date(year, p);
-        // Two identical date headers (due, paid) — Excel parity
-        headers.push(date_h.clone());
-        headers.push(date_h);
+        headers.push((date_h.clone(), fmt_due_hdr.clone()));
+        headers.push((date_h, fmt_paid_hdr.clone()));
     }
     headers.extend([
-        format!("TOTAL {year}"),
-        format!("DETTE DECEMBRE {year}"),
-        "VIREMENT BANQUAIRE".into(),
-        "ADRESSE".into(),
-        "COMPLEMENT ADRESSE".into(),
-        "CODE POSTAL".into(),
-        "VILLE".into(),
-        "PHONE".into(),
-        "EMAIL".into(),
+        (format!("TOTAL {year}"), fmt_total),
+        (format!("DETTE DECEMBRE {year}"), fmt_dette),
+        ("VIREMENT BANQUAIRE".into(), fmt_virement),
+        ("ADRESSE".into(), fmt_adresse),
+        ("COMPLEMENT ADRESSE".into(), fmt_compl),
+        ("CODE POSTAL".into(), fmt_plain.clone()),
+        ("VILLE".into(), fmt_plain.clone()),
+        ("PHONE".into(), fmt_plain.clone()),
+        ("EMAIL".into(), fmt_plain),
     ]);
 
-    for (col, h) in headers.iter().enumerate() {
+    for (col, (h, fmt)) in headers.iter().enumerate() {
         sheet
-            .write_string_with_format(0, col as u16, h, &header_fmt)
+            .write_string_with_format(0, col as u16, h, fmt)
             .map_err(|e| e.to_string())?;
     }
 
     let mut members_stmt = conn
         .prepare(
-            "SELECT id, card_number, last_name, first_name, adhesion_fee,
-                    address, address_complement, postal_code, city, phone, email,
-                    bank_transfer_status
-             FROM members ORDER BY last_name, first_name",
+            "SELECT m.id, m.card_number, m.last_name, m.first_name, m.adhesion_fee,
+                    m.address, m.address_complement, m.postal_code, m.city, m.phone, m.email,
+                    m.bank_transfer_status, m.payment_method, COALESCE(mr.name, 'Normal')
+             FROM members m
+             LEFT JOIN member_roles mr ON mr.id = m.member_role_id
+             ORDER BY m.last_name, m.first_name",
         )
         .map_err(|e| e.to_string())?;
 
@@ -130,6 +168,8 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
                 r.get::<_, Option<String>>(9)?,
                 r.get::<_, Option<String>>(10)?,
                 r.get::<_, Option<String>>(11)?,
+                r.get::<_, String>(12)?,
+                r.get::<_, String>(13)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -152,7 +192,9 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
             city,
             phone,
             email,
-            virement,
+            virement_stored,
+            payment_method,
+            role_name,
         ) = m;
 
         let (prior, ristourne, total_paid, dec_debt): (f64, f64, f64, f64) = conn
@@ -165,6 +207,14 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
         let cells = load_period_cells(conn, id, &periods)?;
+
+        // Prefer stored Excel cell; fall back to role + payment reconstruction.
+        let virement = virement_stored
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                crate::models::reconstruct_virement_cell(role_name, payment_method)
+            });
 
         let mut col: u16 = 0;
         sheet
@@ -181,17 +231,25 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
         col += 1;
         if *adhesion > 0.001 {
             sheet
-                .write_number(excel_row, col, *adhesion)
+                .write_number_with_format(excel_row, col, *adhesion, &cell_adhesion)
+                .map_err(|e| e.to_string())?;
+        } else {
+            sheet
+                .write_string_with_format(excel_row, col, "", &cell_adhesion)
                 .map_err(|e| e.to_string())?;
         }
         col += 1;
         sheet
-            .write_number(excel_row, col, prior)
+            .write_number_with_format(excel_row, col, prior, &cell_dette)
             .map_err(|e| e.to_string())?;
         col += 1;
         if ristourne.abs() > 0.001 {
             sheet
-                .write_number(excel_row, col, ristourne)
+                .write_number_with_format(excel_row, col, ristourne, &cell_ristourne)
+                .map_err(|e| e.to_string())?;
+        } else {
+            sheet
+                .write_string_with_format(excel_row, col, "", &cell_ristourne)
                 .map_err(|e| e.to_string())?;
         }
         col += 1;
@@ -206,20 +264,19 @@ pub fn export_excel(conn: &Connection, path: &str, year: i32) -> Result<ExportRe
                     .write_number(excel_row, col, paid)
                     .map_err(|e| e.to_string())?;
             }
-            // else leave blank
             col += 1;
         }
 
         sheet
-            .write_number(excel_row, col, total_paid)
+            .write_number_with_format(excel_row, col, total_paid, &cell_total)
             .map_err(|e| e.to_string())?;
         col += 1;
         sheet
-            .write_number(excel_row, col, dec_debt)
+            .write_number_with_format(excel_row, col, dec_debt, &cell_dette)
             .map_err(|e| e.to_string())?;
         col += 1;
         sheet
-            .write_string(excel_row, col, virement.as_deref().unwrap_or(""))
+            .write_string(excel_row, col, &virement)
             .map_err(|e| e.to_string())?;
         col += 1;
         sheet
