@@ -1,6 +1,6 @@
 [package]
 name = "ndimbelente"
-version = "0.1.5"
+version = "0.1.6"
 description = "Ndimbelente — association cotisation management (Tauri backend)"
 authors = ["Ndimbelente"]
 edition = "2021"
