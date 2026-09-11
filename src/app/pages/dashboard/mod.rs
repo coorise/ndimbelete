@@ -1,3 +1,4 @@
+pub mod collaboration;
 pub mod cotisations;
 pub mod members;
 pub mod overview;
@@ -6,6 +7,7 @@ pub mod profile;
 pub mod settings;
 pub mod staff;
 
+pub use collaboration::*;
 pub use cotisations::*;
 pub use members::*;
 pub use overview::*;

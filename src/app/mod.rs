@@ -15,8 +15,8 @@ use hooks::AuthProvider;
 use i18n::{use_i18n, I18nProvider};
 use lib::provide_theme;
 use pages::{
-    CotisationsPage, LandingPage, LoginPage, MembersPage, OverviewPage, PlanningPage, ProfilePage,
-    SettingsPage, SetupPage, StaffPage,
+    CollaborationPage, CotisationsPage, LandingPage, LoginPage, MembersPage, OverviewPage,
+    PlanningPage, ProfilePage, SettingsPage, SetupPage, StaffPage,
 };
 
 #[component]
@@ -62,6 +62,7 @@ fn AppRoutes() -> impl IntoView {
                 <Route path=path!("planning") view=PlanningPage />
                 <Route path=path!("profile") view=ProfilePage />
                 <Route path=path!("settings") view=SettingsPage />
+                <Route path=path!("collaboration") view=CollaborationPage />
             </ParentRoute>
         </Routes>
     }

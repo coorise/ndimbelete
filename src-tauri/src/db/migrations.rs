@@ -215,6 +215,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     seed_member_roles(conn)?;
     backfill_member_roles_from_virement(conn)?;
 
+    crate::db::ensure_activity_table(conn)?;
+
     // Backfill meeting dates / collect times / sort_order for existing periods.
     backfill_planning_defaults(conn)?;
 

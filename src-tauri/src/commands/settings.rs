@@ -159,6 +159,14 @@ pub fn update_settings(
         .map_err(|e| e.to_string())?;
     }
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_SETTINGS,
+        "update",
+        "Mise à jour des paramètres généraux",
+    );
+
     drop(conn);
     get_settings(state)
 }

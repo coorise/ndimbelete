@@ -48,6 +48,11 @@ const ITEMS: &[NavItem] = &[
         label_key: "nav.settings",
         badge: "S",
     },
+    NavItem {
+        href: "/app/collaboration",
+        label_key: "nav.collaboration",
+        badge: "G",
+    },
 ];
 
 #[component]

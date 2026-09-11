@@ -9,10 +9,15 @@ mod models;
 mod services;
 mod state;
 
+pub use services::collab;
+pub use db::{open_database, run_migrations};
+
 use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = services::collab::default_database_url(); // load optional .env early
+
     let conn = db::open_database().expect("Failed to open database");
     db::run_migrations(&conn).expect("Failed to run migrations");
 
@@ -26,6 +31,16 @@ pub fn run() {
 
     builder
         .manage(AppState::new(conn))
+        .setup(|app| {
+            services::collab::set_app_handle(app.handle().clone());
+            let cfg = services::collab::load_config();
+            if cfg.connected {
+                if let Some(uri) = cfg.uri {
+                    services::collab::start_listener(uri);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Auth
             commands::needs_setup,
@@ -98,6 +113,21 @@ pub fn run() {
             commands::list_printers,
             commands::print_receipt,
             commands::export_receipt_pdf,
+            // Collaboration
+            commands::collab_get_default_uri,
+            commands::collab_probe,
+            commands::collab_status,
+            commands::collab_connect,
+            commands::collab_disconnect,
+            commands::collab_push,
+            commands::collab_pull,
+            commands::collab_list_commits,
+            commands::collab_list_activities,
+            commands::collab_rollback,
+            commands::collab_cleanup,
+            commands::collab_set_keep_commits,
+            commands::collab_set_push_acl,
+            commands::collab_clear_remote,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@ use leptos_router::hooks::use_navigate;
 use wasm_bindgen::JsCast;
 
 use crate::app::components::help::HelpDialog;
+use crate::app::components::collab::CollabNavControls;
 use crate::app::components::ui::{Button, ButtonVariant, Switch};
 use crate::app::hooks::use_auth;
 use crate::app::i18n::{use_i18n, LanguageSwitcher};
@@ -38,6 +39,10 @@ const PAGE_LINKS: &[PageLink] = &[
     PageLink {
         href: "/app/settings",
         label_key: "nav.settings",
+    },
+    PageLink {
+        href: "/app/collaboration",
+        label_key: "nav.collaboration",
     },
 ];
 
@@ -219,6 +224,7 @@ pub fn Navbar(
                 </div>
 
                 <div class="ml-auto flex items-center gap-2 sm:gap-3">
+                    <CollabNavControls />
                     <LanguageSwitcher />
 
                     <button

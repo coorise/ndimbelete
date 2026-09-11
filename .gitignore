@@ -9,3 +9,4 @@ node_modules/
 .releases/github/dev/*
 !.releases/github/main/.gitkeep
 !.releases/github/dev/.gitkeep
+.env

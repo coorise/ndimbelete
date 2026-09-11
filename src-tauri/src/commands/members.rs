@@ -91,6 +91,17 @@ pub fn create_member(
         }
     })?;
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_MEMBERS,
+        "create",
+        format!(
+            "Ajout du membre {} {} (carte {})",
+            input.first_name, input.last_name, input.card_number.trim()
+        ),
+    );
+
     get_member_by_id(&conn, &id)
 }
 
@@ -143,18 +154,43 @@ pub fn update_member(
         return Err("Membre introuvable".into());
     }
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_MEMBERS,
+        "update",
+        format!(
+            "Modification du membre {} {} (carte {})",
+            input.first_name, input.last_name, input.card_number.trim()
+        ),
+    );
+
     get_member_by_id(&conn, &input.id)
 }
 
 #[tauri::command]
 pub fn delete_member(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conn = state.db.lock();
+    let label: String = conn
+        .query_row(
+            "SELECT first_name || ' ' || last_name || ' (' || card_number || ')' FROM members WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| id.clone());
     let n = conn
         .execute("DELETE FROM members WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("Membre introuvable".into());
     }
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_MEMBERS,
+        "delete",
+        format!("Suppression du membre {label}"),
+    );
     Ok(())
 }
 
@@ -162,11 +198,21 @@ pub fn delete_member(state: State<'_, AppState>, id: String) -> Result<(), Strin
 pub fn delete_members(state: State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
     let conn = state.db.lock();
     let mut deleted = 0usize;
+    let count = ids.len();
     for id in ids {
         let n = conn
             .execute("DELETE FROM members WHERE id = ?1", [&id])
             .map_err(|e| e.to_string())?;
         deleted += n;
+    }
+    if deleted > 0 {
+        crate::commands::note(
+            &state,
+            &conn,
+            crate::db::AREA_MEMBERS,
+            "delete",
+            format!("Suppression de {deleted} membre(s) (sélection de {count})"),
+        );
     }
     Ok(deleted)
 }

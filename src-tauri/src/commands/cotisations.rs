@@ -153,6 +153,14 @@ pub fn set_monthly_amount(
 
     update_year_monthly_amount(&conn, &year_id, amount)?;
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_COTISATIONS,
+        "update",
+        format!("Montant mensuel {amount} € pour l'année {year}"),
+    );
+
     conn.query_row(
         "SELECT id, year, monthly_amount, sheet_label FROM contribution_years WHERE id = ?1",
         [&year_id],
@@ -176,7 +184,15 @@ pub fn record_payment(
     amount: f64,
 ) -> Result<MemberDebtSummary, String> {
     let conn = state.db.lock();
-    cotisation_engine_record_payment(&conn, &member_id, &period_id, amount)
+    let summary = cotisation_engine_record_payment(&conn, &member_id, &period_id, amount)?;
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_COTISATIONS,
+        "payment",
+        format!("Paiement de {amount} € enregistré"),
+    );
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -186,7 +202,15 @@ pub fn clear_payment(
     period_id: String,
 ) -> Result<MemberDebtSummary, String> {
     let conn = state.db.lock();
-    cotisation_engine_clear_payment(&conn, &member_id, &period_id)
+    let summary = cotisation_engine_clear_payment(&conn, &member_id, &period_id)?;
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_COTISATIONS,
+        "clear_payment",
+        "Suppression d'un paiement de cotisation",
+    );
+    Ok(summary)
 }
 
 /// Excel-like cell edit: set due and/or paid for one period cell.

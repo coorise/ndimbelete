@@ -2,9 +2,11 @@
 //!
 //! Each command returns `Result<T, String>` so the frontend gets a clear error message.
 
+mod activity_note;
 mod analytics;
 mod auth;
 mod backup;
+mod collab;
 mod cotisations;
 mod dialogs;
 mod excel;
@@ -17,9 +19,11 @@ mod settings;
 mod staff;
 mod updates;
 
+pub(crate) use activity_note::note;
 pub use analytics::*;
 pub use auth::*;
 pub use backup::*;
+pub use collab::*;
 pub use cotisations::*;
 pub use dialogs::*;
 pub use excel::*;

@@ -155,6 +155,17 @@ pub fn upsert_planning_period(
         }
     };
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_PLANNING,
+        "upsert",
+        format!(
+            "Planning {label} (mois {}, année {})",
+            input.period_month, input.year
+        ),
+    );
+
     conn.query_row(
         "SELECT p.id, y.year, p.period_month, p.label,
                 p.meeting_date, p.collect_start, p.collect_end,
@@ -214,5 +225,12 @@ pub fn delete_planning_period(
     if n == 0 {
         return Err("Période introuvable".into());
     }
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_PLANNING,
+        "delete",
+        "Suppression d'une période de planning",
+    );
     Ok(())
 }
