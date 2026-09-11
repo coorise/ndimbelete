@@ -75,6 +75,7 @@ pub fn today_payment_date() -> String {
 }
 
 /// Build a receipt with year-obligation fields for print / preview.
+/// `total_paid_year` must be the raw sum of payments for the year (not including prior surplus).
 pub fn build_payment_receipt(
     member_name: String,
     card_number: String,
@@ -89,7 +90,7 @@ pub fn build_payment_receipt(
     monthly_amount: f64,
     prior_december_debt: f64,
 ) -> PaymentReceipt {
-    let (_year_total, remaining, credits, _surplus) =
+    let (_year_total, remaining, _credits, _surplus) =
         receipt_year_figures(monthly_amount, prior_december_debt, total_paid_year);
     PaymentReceipt {
         member_name,
@@ -99,7 +100,7 @@ pub fn build_payment_receipt(
         amount,
         debt_before: remaining,
         balance_after,
-        total_paid_year: credits,
+        total_paid_year,
         year,
         org_name,
         org_address,

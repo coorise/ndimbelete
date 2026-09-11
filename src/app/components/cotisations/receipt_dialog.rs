@@ -14,16 +14,17 @@ fn money(v: f64) -> String {
 
 fn surplus_line(surplus: Option<f64>) -> String {
     match surplus {
-        Some(s) if s > 0.001 => format!("Surplus reçus : {}\n", money(s)),
+        Some(s) if s > 0.001 => format!("Surplus reçus : {}", money(s)),
         _ => String::new(),
     }
 }
 
+fn receipt_figures(r: &PaymentReceipt) -> (f64, f64, f64, Option<f64>) {
+    receipt_year_figures(r.monthly_amount, r.prior_december_debt, r.total_paid_year)
+}
+
 fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> ReceiptPrintPayload {
-    let surplus_prev = (-r.prior_december_debt).max(0.0);
-    let raw_paid = (r.total_paid_year - surplus_prev).max(0.0);
-    let (year_total_due, _, _, surplus) =
-        receipt_year_figures(r.monthly_amount, r.prior_december_debt, raw_paid);
+    let (year_total_due, remaining, credits, surplus) = receipt_figures(r);
     ReceiptPrintPayload {
         org_name: if r.org_name.is_empty() {
             settings.org_name.clone()
@@ -40,9 +41,9 @@ fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> Recei
         member_uid: r.member_uid.clone(),
         period_label: r.period_label.clone(),
         amount: r.amount,
-        debt_before: r.debt_before,
+        debt_before: remaining,
         balance_after: r.balance_after,
-        total_paid_year: r.total_paid_year,
+        total_paid_year: credits,
         year: r.year,
         format: format.to_string(),
         payment_date: if r.payment_date.is_empty() {
@@ -113,10 +114,7 @@ fn preview_text(r: &PaymentReceipt, settings: &AppSettings, mini: bool) -> Strin
     } else {
         r.payment_date.clone()
     };
-    let surplus_prev = (-r.prior_december_debt).max(0.0);
-    let raw_paid = (r.total_paid_year - surplus_prev).max(0.0);
-    let (year_total, _, _, surplus) =
-        receipt_year_figures(r.monthly_amount, r.prior_december_debt, raw_paid);
+    let (year_total, remaining, credits, surplus) = receipt_figures(r);
     let year_total_s = money(year_total);
     let surplus_s = surplus_line(surplus);
     tpl.replace("{{ORG.NAME}}", &settings.org_name)
@@ -131,9 +129,9 @@ fn preview_text(r: &PaymentReceipt, settings: &AppSettings, mini: bool) -> Strin
         )
         .replace("{{COTISATION.YEAR}}", &r.year.to_string())
         .replace("{{RECEIVED_AMOUNT}}", &money(r.amount))
-        .replace("{{REMAINING_DEBT}}", &money(r.debt_before))
-        .replace("{{PREVIOUS_DEBT}}", &money(r.debt_before))
-        .replace("{{NEW_BALANCE}}", &money(r.total_paid_year))
+        .replace("{{REMAINING_DEBT}}", &money(remaining))
+        .replace("{{PREVIOUS_DEBT}}", &money(remaining))
+        .replace("{{NEW_BALANCE}}", &money(credits))
         .replace("{{DATE}}", &date)
         .replace("{{PAYMENT_DATE}}", &payment_date)
         .replace("{{YEAR_TOTAL_DUE}}", &year_total_s)

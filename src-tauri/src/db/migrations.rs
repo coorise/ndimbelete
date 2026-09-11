@@ -364,13 +364,14 @@ fn backfill_planning_defaults(conn: &Connection) -> Result<()> {
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-    for (id, year, month, meeting, start, end, sort) in rows {
+    for (id, year, month, meeting, start, end, _sort) in rows {
         let meeting = meeting
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| meeting_date_for(year, month));
         let start = start.filter(|s| !s.is_empty()).unwrap_or_else(|| "14:30".into());
         let end = end.filter(|s| !s.is_empty()).unwrap_or_else(|| "15:30".into());
-        let sort = sort.unwrap_or(month);
+        // Always align sort_order with calendar month.
+        let sort = month;
         conn.execute(
             "UPDATE contribution_periods
              SET meeting_date=?1, collect_start=?2, collect_end=?3, sort_order=?4

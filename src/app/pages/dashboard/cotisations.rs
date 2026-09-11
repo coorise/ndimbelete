@@ -702,9 +702,9 @@ pub fn CotisationsPage() -> impl IntoView {
                 </div>
             </Show>
 
-            <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+            <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Show when=move || view_mode.get() == "grid">
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain pr-1 pb-2 sm:grid-cols-2 xl:grid-cols-3">
                     <For
                         each=move || visible_rows.get()
                         key=|r| r.member.id.clone()
@@ -876,7 +876,7 @@ pub fn CotisationsPage() -> impl IntoView {
                 let density = row_density;
                 let intuit = intuitive.get();
                 view! {
-                    <div class="flex flex-col gap-0">
+                    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <Table class="text-sm" density=density fullscreen_toggle=true>
                         <THead>
                             <Th>
@@ -1222,13 +1222,15 @@ pub fn CotisationsPage() -> impl IntoView {
             </Show>
             </div>
 
-            <TablePaginationBar
-                total=filtered_total
-                page=page
-                page_size=page_size
-                mode=load_mode
-                lazy_count=lazy_count
-            />
+            <div class="shrink-0">
+                <TablePaginationBar
+                    total=filtered_total
+                    page=page
+                    page_size=page_size
+                    mode=load_mode
+                    lazy_count=lazy_count
+                />
+            </div>
 
             <Modal
                 open=view_open.into()

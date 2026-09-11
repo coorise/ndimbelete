@@ -5,7 +5,8 @@ use leptos::task::spawn_local;
 use crate::app::components::ui::{Card, SearchableSelect, SelectOption};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
-    api, DebtVsPaidPoint, Member, OverviewStats, PaymentStatusSlice, PeriodSeriesPoint,
+    api, format_stored_money, is_intuitive_sign, DebtVsPaidPoint, Member, OverviewStats,
+    PaymentStatusSlice, PeriodSeriesPoint,
 };
 
 fn money(v: f64) -> String {
@@ -45,6 +46,8 @@ pub fn OverviewPage() -> impl IntoView {
     let selected_period = RwSignal::new(Option::<String>::None);
     let selected_pie = RwSignal::new(Option::<String>::None);
     let tooltip = RwSignal::new(Option::<ChartTooltipState>::None);
+    let debt_sign = RwSignal::new("intuitive".to_string());
+    let intuitive = Signal::derive(move || is_intuitive_sign(&debt_sign.get()));
 
     let reload = move || {
         let y = year.get_untracked();
@@ -55,6 +58,9 @@ pub fn OverviewPage() -> impl IntoView {
             let _ = api::ensure_year(y).await;
             // Heal statuses when Excel had empty paid columns.
             let _ = api::recalculate_all_members(y).await;
+            if let Ok(s) = api::get_settings().await {
+                debt_sign.set(s.debt_display_sign);
+            }
             match api::get_overview_stats(y, mid_opt.as_deref()).await {
                 Ok(s) => {
                     stats.set(Some(s));
@@ -144,11 +150,13 @@ pub fn OverviewPage() -> impl IntoView {
             </Show>
 
             {move || {
+                let intuit = intuitive.get();
                 stats.get().map(|s| {
                     let by_period_bars = s.by_period.clone();
                     let pie = s.payment_status_pie.clone();
                     let debt_curve = s.debt_vs_paid.clone();
                     let no_payments = s.total_paid < 0.001;
+                    let unpaid_label = format_stored_money(s.total_unpaid, intuit);
                     let status_pie = vec![
                         PaymentStatusSlice {
                             label: "Actifs".into(),
@@ -193,8 +201,8 @@ pub fn OverviewPage() -> impl IntoView {
                                 <StatCard label="Actifs".to_string() value=s.active_count.to_string() />
                                 <StatCard label="Démissionnaires".to_string() value=s.demissionnaire_count.to_string() />
                                 <StatCard label="Total payé".to_string() value=money(s.total_paid) />
-                                <StatCard label="Total dû".to_string() value=money(s.total_due) />
-                                <StatCard label="Impayé".to_string() value=money(s.total_unpaid) />
+                                <StatCard label="Total dû (périodes)".to_string() value=money(s.total_due) />
+                                <StatCard label="Restant / solde".to_string() value=format!("{unpaid_label} €") />
                             </div>
 
                             <div class="grid gap-4 lg:grid-cols-2">

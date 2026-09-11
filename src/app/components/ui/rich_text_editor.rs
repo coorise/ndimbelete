@@ -10,11 +10,13 @@ const PLACEHOLDERS: &[(&str, &str)] = &[
     ("{{USER.NAME}}", "Membre"),
     ("{{USER.CARD}}", "N° carte"),
     ("{{DATE}}", "Date/heure"),
-    ("{{COTISATION.MONTH}}", "Mois"),
+    ("{{PAYMENT_DATE}}", "Date de paiement"),
     ("{{COTISATION.YEAR}}", "Année"),
+    ("{{YEAR_TOTAL_DUE}}", "Montant total année"),
     ("{{RECEIVED_AMOUNT}}", "Montant reçu"),
-    ("{{REMAINING_DEBT}}", "Dette antérieure"),
-    ("{{NEW_BALANCE}}", "Nouveau solde (total payé)"),
+    ("{{REMAINING_DEBT}}", "Restant à payer"),
+    ("{{SURPLUS_LINE}}", "Ligne surplus"),
+    ("{{NEW_BALANCE}}", "Nouveau solde (crédits)"),
 ];
 
 fn exec(cmd: &str, value: Option<&str>) {

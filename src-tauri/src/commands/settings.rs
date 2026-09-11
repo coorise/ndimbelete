@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::models::{
     default_a4_fields, default_a4_template, default_mini_fields, default_mini_template,
-    maybe_upgrade_short_template, AppSettings, ReceiptField,
+    fields_need_receipt_upgrade, maybe_upgrade_short_template, AppSettings, ReceiptField,
 };
 use crate::services::receipt_template::fields_to_template;
 use crate::state::AppState;
@@ -36,23 +36,15 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     let tpl_mini = maybe_upgrade_short_template(&tpl_mini_raw, &default_mini_template());
     let mut fields_a4 = read_fields(&conn, "receipt_fields_a4", default_a4_fields());
     let mut fields_mini = read_fields(&conn, "receipt_fields_mini", default_mini_fields());
-    if !fields_a4.iter().any(|f| f.content.to_lowercase().contains("membre")) {
+    if fields_need_receipt_upgrade(&fields_a4) {
         fields_a4 = default_a4_fields();
     }
-    if !fields_mini
-        .iter()
-        .any(|f| f.content.to_lowercase().contains("membre"))
-    {
+    if fields_need_receipt_upgrade(&fields_mini) {
         fields_mini = default_mini_fields();
     }
     let tpl_a4_upgraded = tpl_a4 != tpl_a4_raw;
     let tpl_mini_upgraded = tpl_mini != tpl_mini_raw;
-    if tpl_a4_upgraded || tpl_mini_upgraded
-        || !fields_a4.iter().any(|f| f.content.to_lowercase().contains("membre"))
-        || !fields_mini
-            .iter()
-            .any(|f| f.content.to_lowercase().contains("membre"))
-    {
+    if tpl_a4_upgraded || tpl_mini_upgraded {
         let _ = conn.execute(
             "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -63,6 +55,12 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             rusqlite::params!["receipt_template_mini", &tpl_mini],
         );
+    }
+    let raw_fa = read_setting(&conn, "receipt_fields_a4", "");
+    let raw_fm = read_setting(&conn, "receipt_fields_mini", "");
+    let old_fa: Vec<ReceiptField> = serde_json::from_str(&raw_fa).unwrap_or_default();
+    let old_fm: Vec<ReceiptField> = serde_json::from_str(&raw_fm).unwrap_or_default();
+    if raw_fa.trim().is_empty() || fields_need_receipt_upgrade(&old_fa) {
         if let Ok(fa) = serde_json::to_string(&fields_a4) {
             let _ = conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
@@ -70,6 +68,8 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
                 rusqlite::params!["receipt_fields_a4", fa],
             );
         }
+    }
+    if raw_fm.trim().is_empty() || fields_need_receipt_upgrade(&old_fm) {
         if let Ok(fm) = serde_json::to_string(&fields_mini) {
             let _ = conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
