@@ -31,6 +31,12 @@ pub struct ReceiptPrintPayload {
     pub year: i32,
     /// `"a4"` or `"mini"`
     pub format: String,
+    #[serde(default)]
+    pub payment_date: String,
+    #[serde(default)]
+    pub year_total_due: f64,
+    #[serde(default)]
+    pub surplus_received: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

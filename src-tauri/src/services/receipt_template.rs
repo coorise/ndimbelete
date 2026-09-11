@@ -44,6 +44,9 @@ pub struct ReceiptContext {
     pub previous_debt: String,
     pub new_balance: String,
     pub printed_at: String,
+    pub payment_date: String,
+    pub year_total_due: String,
+    pub surplus_line: String,
 }
 
 fn money(v: f64) -> String {
@@ -54,6 +57,20 @@ impl ReceiptContext {
     pub fn from_payload(p: &ReceiptPrintPayload, org_address: &str) -> Self {
         let printed_at = Local::now().format("%d/%m/%Y %H:%M").to_string();
         let (day, month) = split_period(&p.period_label, p.year);
+        let payment_date = if p.payment_date.trim().is_empty() {
+            Local::now().format("%d/%m/%Y").to_string()
+        } else {
+            p.payment_date.clone()
+        };
+        let year_total = if p.year_total_due > 0.001 {
+            p.year_total_due
+        } else {
+            0.0
+        };
+        let surplus_line = match p.surplus_received {
+            Some(s) if s > 0.001 => format!("Surplus reçus : {}\n", money(s)),
+            _ => String::new(),
+        };
         Self {
             org_name: p.org_name.clone(),
             org_address: if p.org_address.is_empty() {
@@ -70,9 +87,11 @@ impl ReceiptContext {
             period_label: p.period_label.clone(),
             received_amount: money(p.amount),
             previous_debt: money(p.debt_before),
-            // Nouveau Solde = cumulative amount paid this year (not remaining debt).
             new_balance: money(p.total_paid_year),
             printed_at,
+            payment_date,
+            year_total_due: money(year_total),
+            surplus_line,
         }
     }
 
@@ -91,6 +110,9 @@ impl ReceiptContext {
             .replace("{{PREVIOUS_DEBT}}", &self.previous_debt)
             .replace("{{NEW_BALANCE}}", &self.new_balance)
             .replace("{{DATE}}", &self.printed_at)
+            .replace("{{PAYMENT_DATE}}", &self.payment_date)
+            .replace("{{YEAR_TOTAL_DUE}}", &self.year_total_due)
+            .replace("{{SURPLUS_LINE}}", &self.surplus_line)
     }
 }
 

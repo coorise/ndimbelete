@@ -59,6 +59,7 @@ pub fn PlanningPage() -> impl IntoView {
     let form_date = RwSignal::new(String::new());
     let form_start = RwSignal::new("14:30".to_string());
     let form_end = RwSignal::new("15:30".to_string());
+    let form_color = RwSignal::new("#007A3E".to_string());
     let selected = RwSignal::new(Vec::<String>::new());
     let pending = RwSignal::new(HashMap::<String, String>::new());
 
@@ -330,6 +331,24 @@ pub fn PlanningPage() -> impl IntoView {
                         on_input=Callback::new(move |v| form_end.set(v))
                         placeholder="15:30"
                     />
+                    <label class="flex flex-col gap-1 text-sm font-medium">
+                        "Couleur du mois"
+                        <div class="flex items-center gap-2">
+                            <input
+                                type="color"
+                                class="h-10 w-14 cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)]"
+                                prop:value=move || form_color.get()
+                                on:input=move |ev| form_color.set(event_target_value(&ev))
+                            />
+                            <input
+                                type="text"
+                                class="tap-target min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3"
+                                prop:value=move || form_color.get()
+                                on:change=move |ev| form_color.set(event_target_value(&ev))
+                                placeholder="#007A3E"
+                            />
+                        </div>
+                    </label>
                     <div class="flex items-end gap-2">
                         <Button on_click=Callback::new(move |_| {
                             let y = year.get_untracked();
@@ -338,6 +357,7 @@ pub fn PlanningPage() -> impl IntoView {
                             let date = form_date.get_untracked();
                             let start = form_start.get_untracked();
                             let end = form_end.get_untracked();
+                            let color = form_color.get_untracked();
                             let id = edit_id.get_untracked();
                             spawn_local(async move {
                                 match api::upsert_planning_period(UpsertPlanningInput {
@@ -349,6 +369,11 @@ pub fn PlanningPage() -> impl IntoView {
                                     collect_start: Some(start),
                                     collect_end: Some(end),
                                     sort_order: Some(month),
+                                    label_color: if color.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some(color)
+                                    },
                                 })
                                 .await
                                 {
@@ -357,6 +382,7 @@ pub fn PlanningPage() -> impl IntoView {
                                         form_open.set(false);
                                         form_label.set(String::new());
                                         form_date.set(String::new());
+                                        form_color.set("#007A3E".into());
                                         reload();
                                     }
                                     Err(e) => error.set(Some(e)),
@@ -378,6 +404,7 @@ pub fn PlanningPage() -> impl IntoView {
                                 form_open.set(false);
                                 form_label.set(String::new());
                                 form_date.set(String::new());
+                                form_color.set("#007A3E".into());
                             })
                         >
                             {move || i18n.t("common.cancel")}
@@ -452,6 +479,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                 collect_end: collect_end
                                                     .filter(|s| !s.trim().is_empty()),
                                                 sort_order: Some(p.sort_order),
+                                                label_color: p.label_color.clone(),
                                             };
                                             if let Err(e) = api::upsert_planning_period(input).await
                                             {
@@ -508,6 +536,7 @@ pub fn PlanningPage() -> impl IntoView {
                                     />
                                 </Th>
                                 <Th>"Mois"</Th>
+                                <Th>"Couleur"</Th>
                                 <Th>"Libellé"</Th>
                                 <Th>"Date AG"</Th>
                                 <Th>"Début"</Th>
@@ -562,6 +591,16 @@ pub fn PlanningPage() -> impl IntoView {
                                                     />
                                                 </Td>
                                                 <Td>{MONTH_NAMES.get((p.period_month as usize).saturating_sub(1)).copied().unwrap_or("?")}</Td>
+                                                <Td>
+                                                    <span
+                                                        class="inline-block h-6 w-6 rounded-md border border-[var(--border)]"
+                                                        style=format!(
+                                                            "background-color:{}",
+                                                            p.label_color.clone().unwrap_or_else(|| "#007A3E".into())
+                                                        )
+                                                        title=p.label_color.clone().unwrap_or_default()
+                                                    ></span>
+                                                </Td>
                                                 <Td>
                                                     <EditableCell
                                                         value=cell_value(id_label.clone(), "label", label_base)
@@ -618,6 +657,12 @@ pub fn PlanningPage() -> impl IntoView {
                                                                         .collect_end
                                                                         .clone()
                                                                         .unwrap_or_else(|| "15:30".into()),
+                                                                );
+                                                                form_color.set(
+                                                                    p_edit
+                                                                        .label_color
+                                                                        .clone()
+                                                                        .unwrap_or_else(|| "#007A3E".into()),
                                                                 );
                                                             })
                                                         >

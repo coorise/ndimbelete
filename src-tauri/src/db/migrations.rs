@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS contribution_periods (
     collect_start TEXT DEFAULT '14:30',
     collect_end TEXT DEFAULT '15:30',
     sort_order INTEGER DEFAULT 0,
+    label_color TEXT,
     UNIQUE(year_id, period_month)
 );
 
@@ -190,6 +191,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     add_column_if_missing(
         conn,
         "ALTER TABLE contribution_periods ADD COLUMN sort_order INTEGER DEFAULT 0;",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE contribution_periods ADD COLUMN label_color TEXT;",
     )?;
     add_column_if_missing(conn, "ALTER TABLE staff ADD COLUMN first_name TEXT NOT NULL DEFAULT '';")?;
     add_column_if_missing(conn, "ALTER TABLE staff ADD COLUMN last_name TEXT NOT NULL DEFAULT '';")?;

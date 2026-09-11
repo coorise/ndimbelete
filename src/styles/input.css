@@ -157,8 +157,22 @@ body::before {
   border-bottom: none;
 }
 .table-h-scroll-body {
-  /* hide duplicate bottom scrollbar visual weight slightly thinner ok */
+  overflow: auto;
+  max-height: min(70vh, calc(100dvh - 14rem));
 }
+
+.table-h-scroll-body thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: color-mix(in srgb, var(--brand) 12%, var(--bg-elevated));
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.table-h-scroll-body thead th.sticky {
+  z-index: 7;
+}
+
 .table-h-scroll::-webkit-scrollbar {
   height: 14px;
 }

@@ -97,6 +97,11 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
         receipt_editor_mode_mini: read_setting(&conn, "receipt_editor_mode_mini", "template"),
         receipt_fields_a4: fields_a4,
         receipt_fields_mini: fields_mini,
+        debt_display_sign: read_setting(
+            &conn,
+            "debt_display_sign",
+            &defaults.debt_display_sign,
+        ),
     })
 }
 
@@ -148,6 +153,7 @@ pub fn update_settings(
         ),
         ("receipt_fields_a4", fields_a4.as_str()),
         ("receipt_fields_mini", fields_mini.as_str()),
+        ("debt_display_sign", settings.debt_display_sign.as_str()),
     ];
 
     for (k, v) in pairs {

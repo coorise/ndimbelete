@@ -21,6 +21,9 @@ pub struct ContributionPeriod {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: Option<i32>,
+    /// Hex color for cotisation column headers (optional).
+    #[serde(default)]
+    pub label_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

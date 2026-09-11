@@ -4,7 +4,7 @@ use leptos::task::spawn_local;
 use crate::app::components::ui::{
     Button, ButtonVariant, Input, Modal, SearchableSelect, Select, SelectOption,
 };
-use crate::app::lib::{api, Member, MemberDebtSummary, PaymentReceipt};
+use crate::app::lib::{api, build_payment_receipt, Member, MemberDebtSummary, PaymentReceipt};
 
 fn money(v: f64) -> String {
     format!("{v:.2} €")
@@ -23,6 +23,9 @@ pub fn PaymentModal(
     period_options: Option<Signal<Vec<SelectOption>>>,
     members: Signal<Vec<Member>>,
     org_name: Signal<String>,
+    /// Monthly cotisation amount for the selected year (receipt math).
+    #[prop(optional)]
+    monthly_amount: Option<Signal<f64>>,
     #[prop(optional)] prefill_member_id: Option<RwSignal<String>>,
     #[prop(into)] on_paid: Callback<PaymentReceipt>,
 ) -> impl IntoView {
@@ -246,33 +249,35 @@ pub fn PaymentModal(
                             let members_snap = members.get_untracked();
                             let period_label = active_period_label.get_untracked();
                             let org = org_name.get_untracked();
-                            let debt_before = debt
-                                .get_untracked()
-                                .map(|d| d.balance.max(0.0))
-                                .unwrap_or(amt);
                             spawn_local(async move {
                                 match api::record_payment(&mid, &pid, amt).await {
                                     Ok(summary) => {
                                         let m = members_snap.iter().find(|m| m.id == mid);
-                                        let receipt = PaymentReceipt {
-                                            member_name: m
-                                                .map(|m| {
-                                                    format!("{} {}", m.last_name, m.first_name)
-                                                })
+                                        let monthly = monthly_amount
+                                            .map(|s| s.get_untracked())
+                                            .unwrap_or(0.0);
+                                        let prior = debt
+                                            .get_untracked()
+                                            .map(|d| d.prior_december_debt)
+                                            .unwrap_or(0.0);
+                                        let receipt = build_payment_receipt(
+                                            m.map(|m| {
+                                                format!("{} {}", m.last_name, m.first_name)
+                                            })
+                                            .unwrap_or_default(),
+                                            m.map(|m| m.card_number.clone())
                                                 .unwrap_or_default(),
-                                            card_number: m
-                                                .map(|m| m.card_number.clone())
-                                                .unwrap_or_default(),
-                                            member_uid: mid.clone(),
+                                            mid.clone(),
                                             period_label,
-                                            amount: amt,
-                                            debt_before,
-                                            balance_after: summary.balance,
-                                            total_paid_year: summary.total_paid,
-                                            year: y,
-                                            org_name: org,
-                                            org_address: String::new(),
-                                        };
+                                            amt,
+                                            summary.balance,
+                                            summary.total_paid,
+                                            y,
+                                            org,
+                                            String::new(),
+                                            monthly,
+                                            prior,
+                                        );
                                         open.set(false);
                                         member_id.set(String::new());
                                         amount.set(String::new());
