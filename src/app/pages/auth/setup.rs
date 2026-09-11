@@ -39,8 +39,10 @@ pub fn SetupPage() -> impl IntoView {
     let checking = RwSignal::new(true);
     let backup_path = RwSignal::new(Option::<String>::None);
     let remote_uri = RwSignal::new(String::new());
+    let remote_default_uri = RwSignal::new(String::new());
     let remote_user = RwSignal::new(String::new());
     let remote_pass = RwSignal::new(String::new());
+    let remote_advanced_open = RwSignal::new(false);
 
     Effect::new(move |_| {
         if auth.session.get().is_some() && !force_setup_demo() {
@@ -52,12 +54,14 @@ pub fn SetupPage() -> impl IntoView {
             match api::needs_setup().await {
                 Ok(true) => {
                     if let Ok(Some(u)) = api::collab_get_default_uri().await {
+                        remote_default_uri.set(u.clone());
                         remote_uri.set(u);
                     }
                     checking.set(false);
                 }
                 Ok(false) if force_setup_demo() => {
                     if let Ok(Some(u)) = api::collab_get_default_uri().await {
+                        remote_default_uri.set(u.clone());
                         remote_uri.set(u);
                     }
                     checking.set(false);
@@ -117,18 +121,6 @@ pub fn SetupPage() -> impl IntoView {
                     >
                         <p class="text-[var(--muted)]">{move || i18n.t("setup.remote_help")}</p>
                         <Input
-                            label_key="collab.uri"
-                            value=remote_uri_display.into()
-                            on_input=Callback::new(move |v: String| {
-                                // Keep real URI; ignore edits of the masked display.
-                                if v.contains(":***") {
-                                    return;
-                                }
-                                remote_uri.set(v);
-                            })
-                            placeholder="postgres://user:pass@host:port/db?sslmode=require"
-                        />
-                        <Input
                             label_key="collab.remote_username"
                             value=remote_user.into()
                             on_input=Callback::new(move |v| remote_user.set(v))
@@ -153,7 +145,8 @@ pub fn SetupPage() -> impl IntoView {
                             move |_| {
                                 let u = remote_uri.get_untracked().trim().to_string();
                                 if u.is_empty() {
-                                    error.set(Some("URI obligatoire".into()));
+                                    error.set(Some(i18n.t_static("setup.remote_uri_missing")));
+                                    remote_advanced_open.set(true);
                                     return;
                                 }
                                 let user = remote_user.get_untracked();
@@ -220,6 +213,84 @@ pub fn SetupPage() -> impl IntoView {
                                 }
                             }}
                         </Button>
+
+                        <div class="mt-2 border-t border-[var(--border)] pt-3">
+                            <button
+                                type="button"
+                                class="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--fg)_6%,transparent)] hover:text-[var(--fg)]"
+                                aria-expanded=move || remote_advanced_open.get().to_string()
+                                aria-label=move || i18n.t("setup.remote_advanced")
+                                title=move || i18n.t("setup.remote_advanced")
+                                on:click=move |_| {
+                                    remote_advanced_open.update(|v| *v = !*v);
+                                }
+                            >
+                                <span class="text-base leading-none" aria-hidden="true">
+                                    {move || {
+                                        if remote_advanced_open.get() {
+                                            "▾"
+                                        } else {
+                                            "⚙"
+                                        }
+                                    }}
+                                </span>
+                                <span>{move || i18n.t("setup.remote_advanced")}</span>
+                            </button>
+                            <Show when=move || remote_advanced_open.get()>
+                                <div class="mt-3 flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--fg)_3%,transparent)] p-3">
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                                        <div class="min-w-0 flex-1">
+                                            <Input
+                                                label_key="collab.uri"
+                                                value=remote_uri_display.into()
+                                                on_input=Callback::new(move |v: String| {
+                                                    if v.contains(":***") {
+                                                        return;
+                                                    }
+                                                    remote_uri.set(v);
+                                                })
+                                                placeholder="postgres://…"
+                                            />
+                                        </div>
+                                        <Button
+                                            variant=ButtonVariant::Secondary
+                                            class="shrink-0"
+                                            on_click=Callback::new(move |_| {
+                                                let fallback =
+                                                    remote_default_uri.get_untracked();
+                                                if !fallback.is_empty() {
+                                                    remote_uri.set(fallback);
+                                                    error.set(None);
+                                                    return;
+                                                }
+                                                spawn_local(async move {
+                                                    match api::collab_get_default_uri().await {
+                                                        Ok(Some(u)) => {
+                                                            remote_default_uri.set(u.clone());
+                                                            remote_uri.set(u);
+                                                            error.set(None);
+                                                        }
+                                                        Ok(None) => {
+                                                            error.set(Some(
+                                                                i18n.t_static(
+                                                                    "setup.remote_no_default",
+                                                                ),
+                                                            ));
+                                                        }
+                                                        Err(e) => error.set(Some(e)),
+                                                    }
+                                                });
+                                            })
+                                        >
+                                            {move || i18n.t("setup.remote_default")}
+                                        </Button>
+                                    </div>
+                                    <p class="text-xs text-[var(--muted)]">
+                                        {move || i18n.t("setup.remote_advanced_help")}
+                                    </p>
+                                </div>
+                            </Show>
+                        </div>
                     </div>
 
                     <div
