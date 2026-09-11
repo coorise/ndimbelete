@@ -117,7 +117,7 @@ pub fn Table(
                         .unwrap_or_else(|| "--table-row-py:0.4rem".into())
                 }
             >
-                <table class="w-max min-w-full border-collapse text-left text-sm">
+                <table class="w-max min-w-full border-separate border-spacing-0 text-left text-sm">
                     {children()}
                 </table>
             </div>

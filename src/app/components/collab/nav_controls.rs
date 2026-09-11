@@ -20,6 +20,7 @@ pub fn CollabNavControls() -> impl IntoView {
     let connect_open = RwSignal::new(false);
     let login_step = RwSignal::new(false);
     let push_open = RwSignal::new(false);
+    let pull_open = RwSignal::new(false);
     let uri = RwSignal::new(String::new());
     let remote_user = RwSignal::new(String::new());
     let remote_pass = RwSignal::new(String::new());
@@ -215,30 +216,8 @@ pub fn CollabNavControls() -> impl IntoView {
                     style="background-color:#e6b800;border:1px solid #c99a00;color:#ffffff"
                     title=move || i18n.t("collab.pull")
                     on:click=move |_| {
-                        if !web_sys::window()
-                            .map(|w| {
-                                w.confirm_with_message(
-                                    "Recevoir écrasera les données locales avec la version distante. Continuer ?",
-                                )
-                                .unwrap_or(false)
-                            })
-                            .unwrap_or(false)
-                        {
-                            return;
-                        }
-                        busy.set(true);
                         error.set(None);
-                        spawn_local(async move {
-                            match api::collab_pull().await {
-                                Ok(_) => {
-                                    let _ = api::restart_app().await;
-                                }
-                                Err(e) => {
-                                    error.set(Some(e));
-                                    busy.set(false);
-                                }
-                            }
-                        });
+                        pull_open.set(true);
                     }
                 >
                     <span aria-hidden="true">"↓"</span>
@@ -392,6 +371,55 @@ pub fn CollabNavControls() -> impl IntoView {
                                 i18n.t("common.loading")
                             } else {
                                 i18n.t("collab.push")
+                            }
+                        }}
+                    </Button>
+                </div>
+            </div>
+        </Modal>
+
+        <Modal
+            open=pull_open.into()
+            on_close=Callback::new(move |_| pull_open.set(false))
+            title_signal=Signal::derive(move || i18n.t("collab.pull"))
+        >
+            <div class="flex flex-col gap-3">
+                <p class="text-sm text-[var(--muted)]">
+                    "Recevoir écrasera les données locales avec la version distante. Continuer ?"
+                </p>
+                <Show when=move || error.get().is_some()>
+                    <p class="text-sm text-[var(--brand-red)]" role="alert">
+                        {move || error.get().unwrap_or_default()}
+                    </p>
+                </Show>
+                <div class="flex justify-end gap-2">
+                    <Button
+                        variant=ButtonVariant::Secondary
+                        on_click=Callback::new(move |_| pull_open.set(false))
+                    >
+                        {move || i18n.t("common.cancel")}
+                    </Button>
+                    <Button on_click=Callback::new(move |_| {
+                        busy.set(true);
+                        error.set(None);
+                        spawn_local(async move {
+                            match api::collab_pull().await {
+                                Ok(_) => {
+                                    pull_open.set(false);
+                                    let _ = api::restart_app().await;
+                                }
+                                Err(e) => {
+                                    error.set(Some(e));
+                                    busy.set(false);
+                                }
+                            }
+                        });
+                    })>
+                        {move || {
+                            if busy.get() {
+                                i18n.t("common.loading")
+                            } else {
+                                i18n.t("collab.pull")
                             }
                         }}
                     </Button>

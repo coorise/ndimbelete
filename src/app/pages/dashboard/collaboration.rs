@@ -32,6 +32,9 @@ pub fn CollaborationPage() -> impl IntoView {
     let remote_login_open = RwSignal::new(false);
     let remote_user = RwSignal::new(String::new());
     let remote_pass = RwSignal::new(String::new());
+    let pull_confirm_open = RwSignal::new(false);
+    let restore_confirm_open = RwSignal::new(false);
+    let restore_commit_id = RwSignal::new(Option::<String>::None);
 
     let ensure_root_in_acl = move |staff_ids: &mut Vec<String>, root: Option<&str>| {
         if let Some(rid) = root {
@@ -196,18 +199,12 @@ pub fn CollaborationPage() -> impl IntoView {
     };
 
     let do_pull = move || {
-        if !web_sys::window()
-            .map(|w| {
-                w.confirm_with_message(
-                    "Recevoir écrasera les données locales avec la version distante. Continuer ?",
-                )
-                .unwrap_or(false)
-            })
-            .unwrap_or(false)
-        {
-            return;
-        }
+        pull_confirm_open.set(true);
+    };
+
+    let confirm_pull = move || {
         busy.set(true);
+        pull_confirm_open.set(false);
         spawn_local(async move {
             match api::collab_pull().await {
                 Ok(_) => {
@@ -482,30 +479,8 @@ pub fn CollaborationPage() -> impl IntoView {
                                     <Button
                                         variant=ButtonVariant::Secondary
                                         on_click=Callback::new(move |_| {
-                                            if !web_sys::window()
-                                                .map(|w| {
-                                                    w.confirm_with_message(
-                                                        "Restaurer cette version complète des données en local ?",
-                                                    )
-                                                    .unwrap_or(false)
-                                                })
-                                                .unwrap_or(false)
-                                            {
-                                                return;
-                                            }
-                                            busy.set(true);
-                                            let cid = id_roll.clone();
-                                            spawn_local(async move {
-                                                match api::collab_rollback(&cid).await {
-                                                    Ok(_) => {
-                                                        let _ = api::restart_app().await;
-                                                    }
-                                                    Err(e) => {
-                                                        error.set(Some(e));
-                                                        busy.set(false);
-                                                    }
-                                                }
-                                            });
+                                            restore_commit_id.set(Some(id_roll.clone()));
+                                            restore_confirm_open.set(true);
                                             let _ = id;
                                         })
                                     >
@@ -918,6 +893,75 @@ pub fn CollaborationPage() -> impl IntoView {
                                 i18n.t("collab.connect")
                             }
                         }}
+                    </Button>
+                </div>
+            </div>
+        </Modal>
+
+        <Modal
+            open=pull_confirm_open.into()
+            on_close=Callback::new(move |_| pull_confirm_open.set(false))
+            title_signal=Signal::derive(move || i18n.t("collab.pull"))
+        >
+            <div class="flex flex-col gap-3">
+                <p class="text-sm text-[var(--muted)]">
+                    "Recevoir écrasera les données locales avec la version distante. Continuer ?"
+                </p>
+                <div class="flex justify-end gap-2">
+                    <Button
+                        variant=ButtonVariant::Secondary
+                        on_click=Callback::new(move |_| pull_confirm_open.set(false))
+                    >
+                        {move || i18n.t("common.cancel")}
+                    </Button>
+                    <Button on_click=Callback::new(move |_| confirm_pull())>
+                        {move || i18n.t("collab.pull")}
+                    </Button>
+                </div>
+            </div>
+        </Modal>
+
+        <Modal
+            open=restore_confirm_open.into()
+            on_close=Callback::new(move |_| {
+                restore_confirm_open.set(false);
+                restore_commit_id.set(None);
+            })
+            title_signal=Signal::derive(move || i18n.t("collab.rollback"))
+        >
+            <div class="flex flex-col gap-3">
+                <p class="text-sm text-[var(--muted)]">
+                    "Restaurer cette version complète des données en local ?"
+                </p>
+                <div class="flex justify-end gap-2">
+                    <Button
+                        variant=ButtonVariant::Secondary
+                        on_click=Callback::new(move |_| {
+                            restore_confirm_open.set(false);
+                            restore_commit_id.set(None);
+                        })
+                    >
+                        {move || i18n.t("common.cancel")}
+                    </Button>
+                    <Button on_click=Callback::new(move |_| {
+                        let Some(cid) = restore_commit_id.get_untracked() else {
+                            return;
+                        };
+                        restore_confirm_open.set(false);
+                        busy.set(true);
+                        spawn_local(async move {
+                            match api::collab_rollback(&cid).await {
+                                Ok(_) => {
+                                    let _ = api::restart_app().await;
+                                }
+                                Err(e) => {
+                                    error.set(Some(e));
+                                    busy.set(false);
+                                }
+                            }
+                        });
+                    })>
+                        {move || i18n.t("collab.rollback")}
                     </Button>
                 </div>
             </div>

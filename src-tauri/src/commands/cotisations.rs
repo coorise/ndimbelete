@@ -232,6 +232,66 @@ pub fn set_period_cell(
     )
 }
 
+/// Edit prior-year opening debt / surplus for a member in a year.
+#[tauri::command]
+pub fn set_prior_december_debt(
+    state: State<'_, AppState>,
+    member_id: String,
+    year: i32,
+    value: f64,
+) -> Result<MemberDebtSummary, String> {
+    let conn = state.db.lock();
+    let year_id: String = conn
+        .query_row(
+            "SELECT id FROM contribution_years WHERE year = ?1",
+            [year],
+            |r| r.get(0),
+        )
+        .map_err(|_| format!("Année {year} introuvable"))?;
+
+    let meta_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM member_year_meta WHERE member_id = ?1 AND year_id = ?2",
+            params![member_id, year_id],
+            |r| r.get(0),
+        )
+        .ok();
+
+    if let Some(id) = meta_id {
+        conn.execute(
+            "UPDATE member_year_meta SET prior_december_debt = ?1 WHERE id = ?2",
+            params![value, id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        let nid = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO member_year_meta
+             (id, member_id, year_id, prior_december_debt, ristourne, total_paid, december_debt)
+             VALUES (?1, ?2, ?3, ?4, 0, 0, 0)",
+            params![nid, member_id, year_id, value],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let monthly: f64 = conn
+        .query_row(
+            "SELECT monthly_amount FROM contribution_years WHERE id = ?1",
+            [&year_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0.0);
+    rebuild_running_dues(&conn, &member_id, &year_id, monthly)?;
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_COTISATIONS,
+        "update",
+        format!("Dette précédente mise à jour ({value:.2})"),
+    );
+    recalculate_member_year(&conn, &member_id, &year_id)
+}
+
 #[tauri::command]
 pub fn get_member_debt(
     state: State<'_, AppState>,

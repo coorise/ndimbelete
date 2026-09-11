@@ -4,15 +4,26 @@ use leptos::task::spawn_local;
 use crate::app::components::ui::{Button, ButtonVariant, Modal, Select, SelectOption};
 use crate::app::lib::cn;
 use crate::app::lib::{
-    api, AppSettings, PaymentReceipt, PrintReceiptInput, PrinterInfo, ReceiptField,
-    ReceiptPrintPayload,
+    api, receipt_year_figures, today_payment_date, AppSettings, PaymentReceipt, PrintReceiptInput,
+    PrinterInfo, ReceiptField, ReceiptPrintPayload,
 };
 
 fn money(v: f64) -> String {
     format!("{v:.2} €")
 }
 
+fn surplus_line(surplus: Option<f64>) -> String {
+    match surplus {
+        Some(s) if s > 0.001 => format!("Surplus reçus : {}\n", money(s)),
+        _ => String::new(),
+    }
+}
+
 fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> ReceiptPrintPayload {
+    let surplus_prev = (-r.prior_december_debt).max(0.0);
+    let raw_paid = (r.total_paid_year - surplus_prev).max(0.0);
+    let (year_total_due, _, _, surplus) =
+        receipt_year_figures(r.monthly_amount, r.prior_december_debt, raw_paid);
     ReceiptPrintPayload {
         org_name: if r.org_name.is_empty() {
             settings.org_name.clone()
@@ -34,6 +45,13 @@ fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> Recei
         total_paid_year: r.total_paid_year,
         year: r.year,
         format: format.to_string(),
+        payment_date: if r.payment_date.is_empty() {
+            today_payment_date()
+        } else {
+            r.payment_date.clone()
+        },
+        year_total_due,
+        surplus_received: surplus,
     }
 }
 
@@ -90,6 +108,17 @@ fn preview_text(r: &PaymentReceipt, settings: &AppSettings, mini: bool) -> Strin
     } else {
         settings.receipt_template_a4.clone()
     };
+    let payment_date = if r.payment_date.is_empty() {
+        today_payment_date()
+    } else {
+        r.payment_date.clone()
+    };
+    let surplus_prev = (-r.prior_december_debt).max(0.0);
+    let raw_paid = (r.total_paid_year - surplus_prev).max(0.0);
+    let (year_total, _, _, surplus) =
+        receipt_year_figures(r.monthly_amount, r.prior_december_debt, raw_paid);
+    let year_total_s = money(year_total);
+    let surplus_s = surplus_line(surplus);
     tpl.replace("{{ORG.NAME}}", &settings.org_name)
         .replace("{{ORG.ADDRESS}}", &settings.org_address)
         .replace("{{USER.NAME}}", &r.member_name)
@@ -106,6 +135,9 @@ fn preview_text(r: &PaymentReceipt, settings: &AppSettings, mini: bool) -> Strin
         .replace("{{PREVIOUS_DEBT}}", &money(r.debt_before))
         .replace("{{NEW_BALANCE}}", &money(r.total_paid_year))
         .replace("{{DATE}}", &date)
+        .replace("{{PAYMENT_DATE}}", &payment_date)
+        .replace("{{YEAR_TOTAL_DUE}}", &year_total_s)
+        .replace("{{SURPLUS_LINE}}", &surplus_s)
 }
 
 fn chrono_month_guess(label: &str) -> i32 {

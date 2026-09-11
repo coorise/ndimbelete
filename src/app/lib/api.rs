@@ -425,6 +425,29 @@ pub async fn set_period_cell(
     .await
 }
 
+pub async fn set_prior_december_debt(
+    member_id: &str,
+    year: i32,
+    value: f64,
+) -> Result<MemberDebtSummary, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Arg<'a> {
+        member_id: &'a str,
+        year: i32,
+        value: f64,
+    }
+    invoke(
+        "set_prior_december_debt",
+        Arg {
+            member_id,
+            year,
+            value,
+        },
+    )
+    .await
+}
+
 pub async fn recalculate_all_members(year: i32) -> Result<usize, String> {
     invoke("recalculate_all_members", YearArg { year }).await
 }

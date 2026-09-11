@@ -11,7 +11,10 @@ use crate::app::components::ui::{
 };
 use crate::app::hooks::use_table_fullscreen;
 use crate::app::i18n::use_i18n;
-use crate::app::lib::{api, Member, PaymentReceipt, YearGrid, YearGridRow};
+use crate::app::lib::{
+    api, build_payment_receipt, debt_text_class, format_stored_money, is_intuitive_sign, paid_text_class,
+    AppSettings, Member, PaymentReceipt, YearGrid, YearGridRow,
+};
 
 fn money(v: f64) -> String {
     format!("{v:.2}")
@@ -68,6 +71,8 @@ pub fn CotisationsPage() -> impl IntoView {
     let import_open = RwSignal::new(false);
     let receipt = RwSignal::new(Option::<PaymentReceipt>::None);
     let org_name = RwSignal::new("NDIMBELENTÉ".into());
+    let app_settings = RwSignal::new(AppSettings::default());
+    let debt_sign = RwSignal::new("intuitive".to_string());
 
     let search = RwSignal::new(String::new());
     let payment_filter = RwSignal::new(String::new());
@@ -133,10 +138,14 @@ pub fn CotisationsPage() -> impl IntoView {
     Effect::new(move |_| {
         spawn_local(async move {
             if let Ok(s) = api::get_settings().await {
-                org_name.set(s.org_name);
+                org_name.set(s.org_name.clone());
+                debt_sign.set(s.debt_display_sign.clone());
+                app_settings.set(s);
             }
         });
     });
+
+    let intuitive = Signal::derive(move || is_intuitive_sign(&debt_sign.get()));
 
     let toggle_sort = move |key: SortKey| {
         if sort_key.get_untracked() == key {
@@ -422,16 +431,31 @@ pub fn CotisationsPage() -> impl IntoView {
                         }
                     />
                 </label>
-                <Input
-                    label="Recherche"
-                    placeholder="N° carte ou nom…"
-                    value=search.into()
-                    on_input=Callback::new(move |v| {
-                        search.set(v);
-                        page.set(0);
-                    })
-                    class="min-w-[14rem] flex-1"
-                />
+                <div class="relative min-w-[14rem] flex-1">
+                    <Input
+                        label="Recherche"
+                        placeholder="N° carte ou nom…"
+                        value=search.into()
+                        on_input=Callback::new(move |v| {
+                            search.set(v);
+                            page.set(0);
+                        })
+                        class="w-full pr-10"
+                    />
+                    <Show when=move || !search.get().is_empty()>
+                        <button
+                            type="button"
+                            class="absolute bottom-2 right-2 rounded-lg px-2 py-1 text-sm font-semibold text-[var(--muted)] hover:bg-[color-mix(in_srgb,var(--fg)_8%,transparent)] hover:text-[var(--fg)]"
+                            title="Effacer"
+                            on:click=move |_| {
+                                search.set(String::new());
+                                page.set(0);
+                            }
+                        >
+                            "✕"
+                        </button>
+                    </Show>
+                </div>
                 <button
                     type="button"
                     class=move || {
@@ -540,6 +564,33 @@ pub fn CotisationsPage() -> impl IntoView {
                             })
                         />
                         <RowDensitySlider value=row_density />
+                        <Select
+                            label="Signe dette / surplus"
+                            options=Signal::derive(|| {
+                                vec![
+                                    SelectOption {
+                                        value: "intuitive".into(),
+                                        label: "Intuitif (− dette, + surplus)".into(),
+                                    },
+                                    SelectOption {
+                                        value: "excel".into(),
+                                        label: "Excel (+ dette, − surplus)".into(),
+                                    },
+                                ]
+                            })
+                            value=debt_sign.into()
+                            on_change=Callback::new(move |v: String| {
+                                debt_sign.set(v.clone());
+                                spawn_local(async move {
+                                    let mut s = app_settings.get_untracked();
+                                    s.debt_display_sign = v;
+                                    match api::update_settings(&s).await {
+                                        Ok(updated) => app_settings.set(updated),
+                                        Err(e) => error.set(Some(e)),
+                                    }
+                                });
+                            })
+                        />
                     </div>
                 </div>
             </Show>
@@ -610,9 +661,30 @@ pub fn CotisationsPage() -> impl IntoView {
                             if entries.is_empty() {
                                 return;
                             }
+                            let y = year.get_untracked();
+                            let intuit = intuitive.get_untracked();
                             spawn_local(async move {
                                 for (mid, pid, field, value_str) in entries {
-                                    let value = parse_money_opt(&value_str);
+                                    let parsed = parse_money_opt(&value_str);
+                                    if field == "prior" {
+                                        let stored = match parsed {
+                                            Some(v) if intuit => -v,
+                                            Some(v) => v,
+                                            None => 0.0,
+                                        };
+                                        if let Err(e) =
+                                            api::set_prior_december_debt(&mid, y, stored).await
+                                        {
+                                            error.set(Some(e));
+                                            return;
+                                        }
+                                        continue;
+                                    }
+                                    let value = if field == "due" {
+                                        parsed.map(|v| if intuit { -v } else { v })
+                                    } else {
+                                        parsed
+                                    };
                                     if let Err(e) =
                                         api::set_period_cell(&mid, &pid, &field, value).await
                                     {
@@ -630,7 +702,7 @@ pub fn CotisationsPage() -> impl IntoView {
                 </div>
             </Show>
 
-            <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+            <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             <Show when=move || view_mode.get() == "grid">
                 <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     <For
@@ -674,18 +746,17 @@ pub fn CotisationsPage() -> impl IntoView {
                                     <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
                                         <div>
                                             <p class="text-[var(--muted)]">"Total payé"</p>
-                                            <p class="font-semibold">{format!("{:.2} €", total)}</p>
+                                            <p class="font-semibold text-[var(--brand)]">{format!("{:.2} €", total)}</p>
                                         </div>
                                         <div>
                                             <p class="text-[var(--muted)]">"Dette"</p>
-                                            <p class=move || {
-                                                if balance > 0.001 {
-                                                    "font-semibold text-[var(--brand-red)]"
-                                                } else {
-                                                    "font-semibold text-[var(--brand)]"
-                                                }
-                                            }>
-                                                {format!("{:.2} €", balance)}
+                                            <p class=debt_text_class(balance)>
+                                                {move || {
+                                                    format!(
+                                                        "{} €",
+                                                        format_stored_money(balance, intuitive.get())
+                                                    )
+                                                }}
                                             </p>
                                         </div>
                                     </div>
@@ -753,23 +824,29 @@ pub fn CotisationsPage() -> impl IntoView {
                                                     let period_label = cell
                                                         .map(|c| c.label.clone())
                                                         .unwrap_or_default();
-                                                    receipt.set(Some(PaymentReceipt {
-                                                        member_name: format!(
+                                                    let monthly_amt = monthly
+                                                        .get_untracked()
+                                                        .replace(',', ".")
+                                                        .parse()
+                                                        .unwrap_or(0.0);
+                                                    receipt.set(Some(build_payment_receipt(
+                                                        format!(
                                                             "{} {}",
                                                             row_receipt.member.last_name,
                                                             row_receipt.member.first_name
                                                         ),
-                                                        card_number: row_receipt.member.card_number.clone(),
-                                                        member_uid: row_receipt.member.id.clone(),
+                                                        row_receipt.member.card_number.clone(),
+                                                        row_receipt.member.id.clone(),
                                                         period_label,
                                                         amount,
-                                                        debt_before: (row_receipt.balance + amount).max(0.0),
-                                                        balance_after: row_receipt.balance,
-                                                        total_paid_year: row_receipt.total_paid,
-                                                        year: year.get_untracked(),
-                                                        org_name: org_name.get_untracked(),
-                                                        org_address: String::new(),
-                                                    }));
+                                                        row_receipt.balance,
+                                                        row_receipt.total_paid,
+                                                        year.get_untracked(),
+                                                        org_name.get_untracked(),
+                                                        String::new(),
+                                                        monthly_amt,
+                                                        row_receipt.prior_december_debt,
+                                                    )));
                                                 })
                                             >
                                                 "🧾"
@@ -787,15 +864,17 @@ pub fn CotisationsPage() -> impl IntoView {
             {move || {
                 let g = grid.get();
                 g.map(|g| {
-                let period_labels: Vec<(usize, String)> = g
+                let period_labels: Vec<(usize, String, Option<String>)> = g
                     .periods
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| (i, p.label.clone()))
+                    .map(|(i, p)| (i, p.label.clone(), p.label_color.clone()))
                     .collect();
+                let monthly_amt = g.year.monthly_amount;
                 let sk = sort_key.get();
                 let asc = sort_asc.get();
                 let density = row_density;
+                let intuit = intuitive.get();
                 view! {
                     <div class="flex flex-col gap-0">
                     <Table class="text-sm" density=density fullscreen_toggle=true>
@@ -849,22 +928,44 @@ pub fn CotisationsPage() -> impl IntoView {
                             >
                                 {format!("DETTE PRÉC.{}", sort_arrow(sk == SortKey::Prior, asc))}
                             </Th>
-                            {period_labels.into_iter().map(|(i, label)| {
+                            {period_labels.clone().into_iter().map(|(i, label, color)| {
                                 let due_key = SortKey::PeriodDue(i);
                                 let paid_key = SortKey::PeriodPaid(i);
+                                let due_style = color
+                                    .as_ref()
+                                    .map(|c| {
+                                        format!(
+                                            "background-color:color-mix(in srgb,{c} 35%,var(--bg-elevated));"
+                                        )
+                                    })
+                                    .unwrap_or_default();
+                                let paid_style = color
+                                    .as_ref()
+                                    .map(|c| {
+                                        format!(
+                                            "background-color:color-mix(in srgb,{c} 18%,var(--bg-elevated));"
+                                        )
+                                    })
+                                    .unwrap_or_default();
                                 view! {
-                                    <Th
-                                        class="cursor-pointer bg-[color-mix(in_srgb,var(--fg)_12%,var(--bg-elevated))]"
-                                        on_click=Callback::new(move |_| toggle_sort(due_key))
+                                    <th
+                                        class="cursor-pointer whitespace-nowrap px-2 font-semibold"
+                                        style=format!(
+                                            "padding-top:var(--table-row-py);padding-bottom:var(--table-row-py);{due_style}"
+                                        )
+                                        on:click=move |_| toggle_sort(due_key)
                                     >
                                         {format!("{}{}", label, sort_arrow(sk == due_key, asc))}
-                                    </Th>
-                                    <Th
-                                        class="cursor-pointer bg-[color-mix(in_srgb,var(--brand)_10%,var(--bg-elevated))] font-normal"
-                                        on_click=Callback::new(move |_| toggle_sort(paid_key))
+                                    </th>
+                                    <th
+                                        class="cursor-pointer whitespace-nowrap px-2 font-normal"
+                                        style=format!(
+                                            "padding-top:var(--table-row-py);padding-bottom:var(--table-row-py);{paid_style}"
+                                        )
+                                        on:click=move |_| toggle_sort(paid_key)
                                     >
                                         {format!("{}{}", label, sort_arrow(sk == paid_key, asc))}
-                                    </Th>
+                                    </th>
                                 }
                             }).collect_view()}
                             <Th
@@ -895,12 +996,16 @@ pub fn CotisationsPage() -> impl IntoView {
                                             (c.period_id.clone(), c.amount_due, c.amount_paid)
                                         })
                                         .collect();
-                                    let bal = money(row.balance);
-                                    let bal_cls = if row.balance > 0.0 {
-                                        "font-semibold text-[var(--brand-red)]"
-                                    } else {
-                                        "font-semibold text-[var(--brand)]"
-                                    };
+                                    let bal = format_stored_money(row.balance, intuit);
+                                    let bal_cls = debt_text_class(row.balance);
+                                    let prior_stored = row.prior_december_debt;
+                                    let prior_base = format_stored_money(prior_stored, intuit);
+                                    let prior_cls = debt_text_class(prior_stored);
+                                    let prior_key = format!("{}:prior", row.member.id);
+                                    let prior_key_v = prior_key.clone();
+                                    let prior_key_c = prior_key.clone();
+                                    let mid_prior = row.member.id.clone();
+                                    let total_paid_disp = money(row.total_paid);
                                     let row_view = row.clone();
                                     let row_edit = row.clone();
                                     let row_clear = row.clone();
@@ -920,13 +1025,40 @@ pub fn CotisationsPage() -> impl IntoView {
                                             <Td>{row.member.last_name.clone()}</Td>
                                             <Td>{row.member.first_name.clone()}</Td>
                                             <Td>{row.member.card_number.clone()}</Td>
-                                            <Td>{money(row.prior_december_debt)}</Td>
+                                            <Td class=prior_cls>
+                                                <EditableCell
+                                                    value=Signal::derive(move || {
+                                                        pending_cells
+                                                            .get()
+                                                            .get(&prior_key_v)
+                                                            .map(|t| t.3.clone())
+                                                            .unwrap_or_else(|| prior_base.clone())
+                                                    })
+                                                    on_commit=Callback::new(move |v: String| {
+                                                        pending_cells.update(|m| {
+                                                            m.insert(
+                                                                prior_key_c.clone(),
+                                                                (
+                                                                    mid_prior.clone(),
+                                                                    String::new(),
+                                                                    "prior".into(),
+                                                                    v,
+                                                                ),
+                                                            );
+                                                        });
+                                                    })
+                                                    input_type="number"
+                                                    class=prior_cls
+                                                />
+                                            </Td>
                                             {period_cells.into_iter().map(|(pid, amount_due, amount_paid)| {
                                                 let mid_due = row.member.id.clone();
                                                 let mid_paid = row.member.id.clone();
                                                 let pid_due = pid.clone();
                                                 let pid_paid = pid.clone();
-                                                let base_due = money(amount_due);
+                                                let base_due = format_stored_money(amount_due, intuit);
+                                                let due_cls = debt_text_class(amount_due);
+                                                let paid_cls = paid_text_class(amount_paid);
                                                 let base_paid = amount_paid
                                                     .map(money)
                                                     .unwrap_or_default();
@@ -937,7 +1069,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                 let due_key_c = due_key.clone();
                                                 let paid_key_c = paid_key.clone();
                                                 view! {
-                                                    <Td class="whitespace-nowrap text-[var(--muted)]">
+                                                    <Td class=due_cls>
                                                         <EditableCell
                                                             value=Signal::derive(move || {
                                                                 pending_cells
@@ -960,10 +1092,10 @@ pub fn CotisationsPage() -> impl IntoView {
                                                                 });
                                                             })
                                                             input_type="number"
-                                                            class="text-[var(--muted)]"
+                                                            class=due_cls
                                                         />
                                                     </Td>
-                                                    <Td class="whitespace-nowrap font-semibold">
+                                                    <Td class=paid_cls>
                                                         <EditableCell
                                                             value=Signal::derive(move || {
                                                                 pending_cells
@@ -986,12 +1118,12 @@ pub fn CotisationsPage() -> impl IntoView {
                                                                 });
                                                             })
                                                             input_type="number"
-                                                            placeholder="—"
+                                                            class=paid_cls
                                                         />
                                                     </Td>
                                                 }
                                             }).collect_view()}
-                                            <Td class="font-semibold">{money(row.total_paid)}</Td>
+                                            <Td class="font-semibold text-[var(--brand)]">{total_paid_disp}</Td>
                                             <Td class=bal_cls>{bal}</Td>
                                             <Td sticky=true>
                                                 <div class="flex flex-nowrap gap-1">
@@ -1054,23 +1186,24 @@ pub fn CotisationsPage() -> impl IntoView {
                                                             let period_label = cell
                                                                 .map(|c| c.label.clone())
                                                                 .unwrap_or_default();
-                                                            receipt.set(Some(PaymentReceipt {
-                                                                member_name: format!(
+                                                            receipt.set(Some(build_payment_receipt(
+                                                                format!(
                                                                     "{} {}",
                                                                     row_receipt.member.last_name,
                                                                     row_receipt.member.first_name
                                                                 ),
-                                                                card_number: row_receipt.member.card_number.clone(),
-                                                                member_uid: row_receipt.member.id.clone(),
+                                                                row_receipt.member.card_number.clone(),
+                                                                row_receipt.member.id.clone(),
                                                                 period_label,
                                                                 amount,
-                                                                debt_before: (row_receipt.balance + amount).max(0.0),
-                                                                balance_after: row_receipt.balance,
-                                                                total_paid_year: row_receipt.total_paid,
-                                                                year: year.get_untracked(),
-                                                                org_name: org_name.get_untracked(),
-                                                                org_address: String::new(),
-                                                            }));
+                                                                row_receipt.balance,
+                                                                row_receipt.total_paid,
+                                                                year.get_untracked(),
+                                                                org_name.get_untracked(),
+                                                                String::new(),
+                                                                monthly_amt,
+                                                                row_receipt.prior_december_debt,
+                                                            )));
                                                         })
                                                     >
                                                         "🧾"
@@ -1146,6 +1279,13 @@ pub fn CotisationsPage() -> impl IntoView {
                 period_options=current_period_options
                 members=members_sig
                 org_name=org_name.into()
+                monthly_amount=Signal::derive(move || {
+                    monthly
+                        .get()
+                        .replace(',', ".")
+                        .parse()
+                        .unwrap_or(0.0)
+                })
                 prefill_member_id=prefill_member
                 on_paid=Callback::new(move |r| {
                     receipt.set(Some(r));

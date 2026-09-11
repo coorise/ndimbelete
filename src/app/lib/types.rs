@@ -226,6 +226,8 @@ pub struct ContributionPeriod {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    pub label_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -316,6 +318,13 @@ pub struct AppSettings {
     pub receipt_fields_a4: Vec<ReceiptField>,
     #[serde(default = "default_mini_fields")]
     pub receipt_fields_mini: Vec<ReceiptField>,
+    /// `intuitive` (default) or `excel`.
+    #[serde(default = "default_debt_display_sign")]
+    pub debt_display_sign: String,
+}
+
+fn default_debt_display_sign() -> String {
+    "intuitive".into()
 }
 
 fn default_currency_unit() -> String {
@@ -328,13 +337,13 @@ fn default_editor_mode() -> String {
 
 fn default_a4_template() -> String {
     plain_lines_to_html(
-        "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nPériode : {{COTISATION.MONTH}}/{{COTISATION.YEAR}}\n\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nDette antérieure : {{REMAINING_DEBT}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ",
+        "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ",
     )
 }
 
 fn default_mini_template() -> String {
     plain_lines_to_html(
-        "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nPériode : {{COTISATION.MONTH}}/{{COTISATION.YEAR}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nDette antérieure : {{REMAINING_DEBT}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ",
+        "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ",
     )
 }
 
@@ -432,6 +441,7 @@ impl Default for AppSettings {
             receipt_editor_mode_mini: default_editor_mode(),
             receipt_fields_a4: default_a4_fields(),
             receipt_fields_mini: default_mini_fields(),
+            debt_display_sign: default_debt_display_sign(),
         }
     }
 }
@@ -483,6 +493,8 @@ pub struct PlanningPeriod {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: i32,
+    #[serde(default)]
+    pub label_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -496,6 +508,8 @@ pub struct UpsertPlanningInput {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    pub label_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -557,6 +571,9 @@ pub struct PaymentReceipt {
     pub year: i32,
     pub org_name: String,
     pub org_address: String,
+    pub monthly_amount: f64,
+    pub prior_december_debt: f64,
+    pub payment_date: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -586,6 +603,12 @@ pub struct ReceiptPrintPayload {
     pub total_paid_year: f64,
     pub year: i32,
     pub format: String,
+    #[serde(default)]
+    pub payment_date: String,
+    #[serde(default)]
+    pub year_total_due: f64,
+    #[serde(default)]
+    pub surplus_received: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

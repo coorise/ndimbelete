@@ -78,6 +78,7 @@ pub fn run() {
             commands::record_payment,
             commands::clear_payment,
             commands::set_period_cell,
+            commands::set_prior_december_debt,
             commands::get_member_debt,
             commands::get_member_debt_as_of,
             commands::list_years,

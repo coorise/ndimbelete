@@ -17,7 +17,7 @@ pub fn Tabs(
     view! {
         <div
             role="tablist"
-            class=cn(&["flex flex-wrap gap-2 rounded-xl bg-[color-mix(in_srgb,var(--fg)_5%,transparent)] p-1", class])
+            class=cn(&["flex flex-nowrap gap-1 overflow-x-auto rounded-xl bg-[color-mix(in_srgb,var(--fg)_5%,transparent)] p-1", class])
         >
             <For
                 each=move || items.get()
@@ -31,7 +31,7 @@ pub fn Tabs(
                             role="tab"
                             class=move || {
                                 cn(&[
-                                    "tap-target rounded-lg px-4 py-2 text-base font-semibold transition",
+                                    "tap-target shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition sm:px-4 sm:text-base",
                                     if active.get() == id {
                                         "bg-[var(--brand)] text-white shadow-sm"
                                     } else {

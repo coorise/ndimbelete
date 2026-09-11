@@ -160,7 +160,7 @@ pub fn load_periods(conn: &Connection, year_id: &str) -> Result<Vec<Contribution
     let mut stmt = conn
         .prepare(
             "SELECT id, year_id, period_month, label,
-                    meeting_date, collect_start, collect_end, sort_order
+                    meeting_date, collect_start, collect_end, sort_order, label_color
              FROM contribution_periods
              WHERE year_id = ?1
              ORDER BY COALESCE(sort_order, period_month), period_month ASC",
@@ -178,6 +178,7 @@ pub fn load_periods(conn: &Connection, year_id: &str) -> Result<Vec<Contribution
                 collect_start: r.get(5)?,
                 collect_end: r.get(6)?,
                 sort_order: r.get(7)?,
+                label_color: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?;

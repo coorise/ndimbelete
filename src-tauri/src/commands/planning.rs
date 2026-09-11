@@ -18,6 +18,8 @@ pub struct PlanningPeriod {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: i32,
+    #[serde(default)]
+    pub label_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +33,7 @@ pub struct UpsertPlanningInput {
     pub collect_start: Option<String>,
     pub collect_end: Option<String>,
     pub sort_order: Option<i32>,
+    pub label_color: Option<String>,
 }
 
 #[tauri::command]
@@ -42,7 +45,7 @@ pub fn list_planning(state: State<'_, AppState>, year: i32) -> Result<Vec<Planni
         .prepare(
             "SELECT p.id, y.year, p.period_month, p.label,
                     p.meeting_date, p.collect_start, p.collect_end,
-                    COALESCE(p.sort_order, p.period_month)
+                    COALESCE(p.sort_order, p.period_month), p.label_color
              FROM contribution_periods p
              JOIN contribution_years y ON y.id = p.year_id
              WHERE p.year_id = ?1
@@ -61,6 +64,7 @@ pub fn list_planning(state: State<'_, AppState>, year: i32) -> Result<Vec<Planni
                 collect_start: r.get(5)?,
                 collect_end: r.get(6)?,
                 sort_order: r.get(7)?,
+                label_color: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -94,13 +98,18 @@ pub fn upsert_planning_period(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "15:30".into());
     let sort = input.sort_order.unwrap_or(input.period_month);
+    let color = input
+        .label_color
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let id = if let Some(ref existing) = input.id {
         conn.execute(
             "UPDATE contribution_periods
              SET period_month=?1, label=?2, meeting_date=?3,
-                 collect_start=?4, collect_end=?5, sort_order=?6
-             WHERE id=?7 AND year_id=?8",
+                 collect_start=?4, collect_end=?5, sort_order=?6, label_color=?7
+             WHERE id=?8 AND year_id=?9",
             rusqlite::params![
                 input.period_month,
                 label,
@@ -108,6 +117,7 @@ pub fn upsert_planning_period(
                 start,
                 end,
                 sort,
+                color,
                 existing,
                 year_id
             ],
@@ -125,9 +135,9 @@ pub fn upsert_planning_period(
             Ok(eid) => {
                 conn.execute(
                     "UPDATE contribution_periods
-                     SET label=?1, meeting_date=?2, collect_start=?3, collect_end=?4, sort_order=?5
-                     WHERE id=?6",
-                    rusqlite::params![label, meeting, start, end, sort, eid],
+                     SET label=?1, meeting_date=?2, collect_start=?3, collect_end=?4, sort_order=?5, label_color=?6
+                     WHERE id=?7",
+                    rusqlite::params![label, meeting, start, end, sort, color, eid],
                 )
                 .map_err(|e| e.to_string())?;
                 eid
@@ -136,8 +146,8 @@ pub fn upsert_planning_period(
                 let nid = Uuid::new_v4().to_string();
                 conn.execute(
                     "INSERT INTO contribution_periods
-                     (id, year_id, period_month, label, meeting_date, collect_start, collect_end, sort_order)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                     (id, year_id, period_month, label, meeting_date, collect_start, collect_end, sort_order, label_color)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
                     rusqlite::params![
                         nid,
                         year_id,
@@ -146,7 +156,8 @@ pub fn upsert_planning_period(
                         meeting,
                         start,
                         end,
-                        sort
+                        sort,
+                        color
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -169,7 +180,7 @@ pub fn upsert_planning_period(
     conn.query_row(
         "SELECT p.id, y.year, p.period_month, p.label,
                 p.meeting_date, p.collect_start, p.collect_end,
-                COALESCE(p.sort_order, p.period_month)
+                COALESCE(p.sort_order, p.period_month), p.label_color
          FROM contribution_periods p
          JOIN contribution_years y ON y.id = p.year_id
          WHERE p.id = ?1",
@@ -184,6 +195,7 @@ pub fn upsert_planning_period(
                 collect_start: r.get(5)?,
                 collect_end: r.get(6)?,
                 sort_order: r.get(7)?,
+                label_color: r.get(8)?,
             })
         },
     )

@@ -52,6 +52,13 @@ pub struct AppSettings {
     pub receipt_fields_a4: Vec<ReceiptField>,
     #[serde(default = "default_mini_fields")]
     pub receipt_fields_mini: Vec<ReceiptField>,
+    /// `intuitive` = debt shown negative / surplus positive; `excel` = Excel-style (surplus negative).
+    #[serde(default = "default_debt_display_sign")]
+    pub debt_display_sign: String,
+}
+
+fn default_debt_display_sign() -> String {
+    "intuitive".into()
 }
 
 fn default_currency_unit() -> String {
@@ -150,18 +157,19 @@ impl Default for AppSettings {
             receipt_editor_mode_mini: default_editor_mode(),
             receipt_fields_a4: default_a4_fields(),
             receipt_fields_mini: default_mini_fields(),
+            debt_display_sign: default_debt_display_sign(),
         }
     }
 }
 
 /// Long readable default (plain / markdown markers).
 pub fn default_mini_template_plain() -> String {
-    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nPériode : {{COTISATION.MONTH}}/{{COTISATION.YEAR}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nDette antérieure : {{REMAINING_DEBT}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
 pub fn default_a4_template_plain() -> String {
-    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nPériode : {{COTISATION.MONTH}}/{{COTISATION.YEAR}}\n\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nDette antérieure : {{REMAINING_DEBT}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
