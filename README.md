@@ -45,11 +45,17 @@ bun run css:build   # ou css:watch
 cargo tauri dev
 ```
 
-Build production :
+Build production for desktop :
 
 ```bash
 cargo tauri build
 ```
+
+Build static files for web hosting supporting only HTML/CSS/JS:
+```bash
+cargo run --features=ssr
+```
+This will create the static files in the ./target/site directory.
 
 ## Première connexion
 

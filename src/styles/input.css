@@ -6,6 +6,7 @@
   --brand-green: #0b7a3e;
   --brand-red: #ce1126;
   --brand-yellow: #f5d76e;
+  --brand-yellow-strong: #c9a227;
   --brand: var(--brand-green);
   --bg: #f7f3ea;
   --bg-elevated: #fffdf8;
@@ -84,6 +85,21 @@ body::before {
 .tap-target {
   min-height: var(--tap-min);
   min-width: var(--tap-min);
+}
+
+/* Collaboration pull — solid yellow (do not rely on Tailwind arbitrary classes from Rust). */
+.btn-collab-pull {
+  background-color: #e6b800 !important;
+  border: 1px solid #c99a00 !important;
+  color: #ffffff !important;
+}
+
+.btn-collab-pull:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn-collab-pull:disabled {
+  opacity: 0.5;
 }
 
 .sr-only {

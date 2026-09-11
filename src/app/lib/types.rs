@@ -643,3 +643,81 @@ pub const PAYMENT_METHOD_OPTIONS: &[(&str, &str)] = &[
     ("bank_transfer", "Virement bancaire"),
     ("none", "Aucun"),
 ];
+
+// —— Collaboration ——
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProbe {
+    pub ok: bool,
+    pub has_head: bool,
+    pub head_commit_id: Option<String>,
+    pub commit_count: i64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabStatus {
+    pub connected: bool,
+    pub uri_masked: Option<String>,
+    pub default_uri_masked: Option<String>,
+    pub has_default_uri: bool,
+    pub last_commit_id: Option<String>,
+    pub dirty: bool,
+    pub keep_commits: u32,
+    pub remote_commit_count: Option<i64>,
+    pub remote_head_id: Option<String>,
+    pub pending_remote_push: bool,
+    #[serde(default)]
+    pub can_push: bool,
+    #[serde(default)]
+    pub push_role_ids: Vec<String>,
+    #[serde(default)]
+    pub push_staff_ids: Vec<String>,
+    #[serde(default)]
+    pub root_staff_id: Option<String>,
+    #[serde(default)]
+    pub local_change_count: u32,
+    #[serde(default)]
+    pub remote_ahead_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabConnectResult {
+    pub needs_remote_login: bool,
+    pub status: CollabStatus,
+    pub session: Option<SessionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabCommitInfo {
+    pub id: String,
+    pub message: String,
+    pub author_name: Option<String>,
+    pub author_staff_id: Option<String>,
+    pub created_at: String,
+    pub parent_id: Option<String>,
+    pub is_head: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabPushResult {
+    pub commit_id: String,
+    pub cleaned: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityEntry {
+    pub id: String,
+    pub staff_id: Option<String>,
+    pub staff_name: Option<String>,
+    pub area: String,
+    pub action: String,
+    pub summary: String,
+    pub created_at: String,
+}

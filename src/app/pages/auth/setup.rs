@@ -9,7 +9,7 @@ use crate::app::hooks::use_auth;
 use crate::app::i18n::use_i18n;
 use crate::app::lib::api;
 
-/// First-run screen: create admin OR restore a backup.
+/// First-run screen: create admin, restore backup, OR connect remote.
 #[component]
 pub fn SetupPage() -> impl IntoView {
     let auth = use_auth();
@@ -31,6 +31,7 @@ pub fn SetupPage() -> impl IntoView {
     let busy = RwSignal::new(false);
     let checking = RwSignal::new(true);
     let backup_path = RwSignal::new(Option::<String>::None);
+    let remote_uri = RwSignal::new(String::new());
 
     Effect::new(move |_| {
         if auth.session.get().is_some() {
@@ -40,7 +41,12 @@ pub fn SetupPage() -> impl IntoView {
         let navigate_guard = navigate_guard.clone();
         spawn_local(async move {
             match api::needs_setup().await {
-                Ok(true) => checking.set(false),
+                Ok(true) => {
+                    if let Ok(Some(u)) = api::collab_get_default_uri().await {
+                        remote_uri.set(u);
+                    }
+                    checking.set(false);
+                }
                 Ok(false) => navigate_guard("/login", Default::default()),
                 Err(e) => {
                     error.set(Some(e));
@@ -59,6 +65,10 @@ pub fn SetupPage() -> impl IntoView {
             TabItem {
                 id: "backup",
                 label: i18n.t("setup.tab_backup"),
+            },
+            TabItem {
+                id: "remote",
+                label: i18n.t("setup.tab_remote"),
             },
         ]
     });
@@ -270,8 +280,90 @@ pub fn SetupPage() -> impl IntoView {
                             }}
                         </Button>
                     </div>
+
+                    <div
+                        class="mt-8 flex flex-col gap-4"
+                        class:hidden=move || tab.get() != "remote"
+                    >
+                        <p class="text-[var(--muted)]">{move || i18n.t("setup.remote_help")}</p>
+                        <Input
+                            label_key="collab.uri"
+                            value=remote_uri.into()
+                            on_input=Callback::new(move |v| remote_uri.set(v))
+                            placeholder="postgres://…"
+                        />
+                        <Show when=move || error.get().is_some() && tab.get() == "remote">
+                            <p
+                                class="rounded-xl bg-[color-mix(in_srgb,var(--brand-red)_12%,transparent)] px-3 py-2 text-[var(--brand-red)]"
+                                role="alert"
+                            >
+                                {move || error.get().unwrap_or_default()}
+                            </p>
+                        </Show>
+                        <Button on_click=Callback::new({
+                            let navigate = navigate.clone();
+                            move |_| {
+                                let u = remote_uri.get_untracked().trim().to_string();
+                                if u.is_empty() {
+                                    error.set(Some("URI obligatoire".into()));
+                                    return;
+                                }
+                                busy.set(true);
+                                error.set(None);
+                                let navigate = navigate.clone();
+                                spawn_local(async move {
+                                    match api::collab_connect(&u, None, None).await {
+                                        Ok(res) => {
+                                            if res.needs_remote_login {
+                                                error.set(Some(
+                                                    "Distant déjà initialisé — connectez-vous depuis Collaboration avec un compte distant.".into(),
+                                                ));
+                                                busy.set(false);
+                                                return;
+                                            }
+                                            match api::needs_setup().await {
+                                                Ok(false) => {
+                                                    let _ = api::restart_app().await;
+                                                }
+                                                Ok(true) => {
+                                                    info_or_tab_admin(
+                                                        &error,
+                                                        &tab,
+                                                        "Distant vide — créez l'administrateur (onglet local).",
+                                                    );
+                                                    busy.set(false);
+                                                }
+                                                Err(e) => {
+                                                    error.set(Some(e));
+                                                    busy.set(false);
+                                                }
+                                            }
+                                            let _ = navigate;
+                                        }
+                                        Err(e) => {
+                                            error.set(Some(e));
+                                            busy.set(false);
+                                        }
+                                    }
+                                });
+                            }
+                        })>
+                            {move || {
+                                if busy.get() {
+                                    i18n.t("setup.remote_connecting")
+                                } else {
+                                    i18n.t("setup.remote_connect")
+                                }
+                            }}
+                        </Button>
+                    </div>
                 </div>
             </div>
         </div>
     }
+}
+
+fn info_or_tab_admin(error: &RwSignal<Option<String>>, tab: &RwSignal<&'static str>, msg: &str) {
+    error.set(Some(msg.into()));
+    tab.set("admin");
 }

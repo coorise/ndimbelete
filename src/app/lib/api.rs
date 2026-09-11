@@ -611,3 +611,120 @@ pub async fn check_for_update() -> Result<UpdateInfo, String> {
 pub async fn download_and_install_update() -> Result<(), String> {
     invoke_unit("download_and_install_update", Empty {}).await
 }
+
+// —— Collaboration ——
+
+pub async fn collab_get_default_uri() -> Result<Option<String>, String> {
+    invoke("collab_get_default_uri", Empty {}).await
+}
+
+pub async fn collab_probe(uri: &str) -> Result<RemoteProbe, String> {
+    #[derive(Serialize)]
+    struct Arg<'a> {
+        uri: &'a str,
+    }
+    invoke("collab_probe", Arg { uri }).await
+}
+
+pub async fn collab_status() -> Result<CollabStatus, String> {
+    invoke("collab_status", Empty {}).await
+}
+
+pub async fn collab_connect(
+    uri: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<CollabConnectResult, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Arg<'a> {
+        uri: &'a str,
+        username: Option<&'a str>,
+        password: Option<&'a str>,
+    }
+    invoke(
+        "collab_connect",
+        Arg {
+            uri,
+            username,
+            password,
+        },
+    )
+    .await
+}
+
+pub async fn collab_disconnect() -> Result<(), String> {
+    invoke_unit("collab_disconnect", Empty {}).await
+}
+
+pub async fn collab_push(message: Option<&str>) -> Result<CollabPushResult, String> {
+    #[derive(Serialize)]
+    struct Arg {
+        message: Option<String>,
+    }
+    invoke(
+        "collab_push",
+        Arg {
+            message: message.map(|s| s.to_string()),
+        },
+    )
+    .await
+}
+
+pub async fn collab_pull() -> Result<CollabStatus, String> {
+    invoke("collab_pull", Empty {}).await
+}
+
+pub async fn collab_list_commits() -> Result<Vec<CollabCommitInfo>, String> {
+    invoke("collab_list_commits", Empty {}).await
+}
+
+pub async fn collab_list_activities(limit: Option<i64>) -> Result<Vec<ActivityEntry>, String> {
+    #[derive(Serialize)]
+    struct Arg {
+        limit: Option<i64>,
+    }
+    invoke("collab_list_activities", Arg { limit }).await
+}
+
+pub async fn collab_rollback(commit_id: &str) -> Result<CollabStatus, String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Arg<'a> {
+        commit_id: &'a str,
+    }
+    invoke("collab_rollback", Arg { commit_id }).await
+}
+
+pub async fn collab_cleanup(keep: Option<u32>) -> Result<u64, String> {
+    #[derive(Serialize)]
+    struct Arg {
+        keep: Option<u32>,
+    }
+    invoke("collab_cleanup", Arg { keep }).await
+}
+
+pub async fn collab_set_keep_commits(keep: u32) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Arg {
+        keep: u32,
+    }
+    invoke_unit("collab_set_keep_commits", Arg { keep }).await
+}
+
+pub async fn collab_set_push_acl(
+    role_ids: Vec<String>,
+    staff_ids: Vec<String>,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Arg {
+        role_ids: Vec<String>,
+        staff_ids: Vec<String>,
+    }
+    invoke_unit("collab_set_push_acl", Arg { role_ids, staff_ids }).await
+}
+
+pub async fn collab_clear_remote() -> Result<(), String> {
+    invoke_unit("collab_clear_remote", Empty {}).await
+}

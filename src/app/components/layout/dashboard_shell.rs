@@ -165,7 +165,7 @@ pub fn DashboardShell() -> impl IntoView {
                     </Show>
                     <main class=move || {
                         cn(&[
-                            "flex min-h-0 flex-1 flex-col overflow-hidden",
+                            "flex min-h-0 flex-1 flex-col overflow-y-auto",
                             if fs.active.get() {
                                 "p-3 sm:p-4"
                             } else {

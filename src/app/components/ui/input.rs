@@ -15,6 +15,8 @@ pub fn Input(
     #[prop(optional)] value: Option<Signal<String>>,
     #[prop(optional)] on_input: Option<Callback<String>>,
     #[prop(optional)] disabled: bool,
+    /// Reactive disabled override (takes precedence when set).
+    #[prop(optional)] disabled_signal: Option<Signal<bool>>,
     #[prop(optional)] class: &'static str,
     #[prop(optional)] required: bool,
 ) -> impl IntoView {
@@ -50,7 +52,11 @@ pub fn Input(
                         placeholder.to_string()
                     }
                 }
-                disabled=disabled
+                prop:disabled=move || {
+                    disabled_signal
+                        .map(|s| s.get())
+                        .unwrap_or(disabled)
+                }
                 prop:required=required
                 prop:value=move || value.map(|v| v.get()).unwrap_or_default()
                 on:input=move |ev| {

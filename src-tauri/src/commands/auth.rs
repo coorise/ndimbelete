@@ -112,6 +112,13 @@ pub fn setup_admin(
     })
 }
 
+pub(crate) fn load_staff_session(
+    conn: &rusqlite::Connection,
+    staff_id: &str,
+) -> Result<(Staff, Vec<String>), String> {
+    load_staff(conn, staff_id)
+}
+
 fn load_staff(conn: &rusqlite::Connection, staff_id: &str) -> Result<(Staff, Vec<String>), String> {
     let founder: Option<String> = conn
         .query_row(

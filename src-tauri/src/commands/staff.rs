@@ -62,7 +62,9 @@ pub fn list_staff(state: State<'_, AppState>) -> Result<Vec<Staff>, String> {
     let conn = state.db.lock();
     let founder = founder_id(&conn);
     let mut stmt = conn
-        .prepare(&format!("{STAFF_SELECT} ORDER BY s.last_name, s.first_name, s.full_name"))
+        .prepare(&format!(
+            "{STAFF_SELECT} ORDER BY s.last_name, s.first_name, s.full_name"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| map_staff(row, &founder))
@@ -86,8 +88,7 @@ pub fn create_staff(state: State<'_, AppState>, input: CreateStaffInput) -> Resu
     let conn = state.db.lock();
     let id = Uuid::new_v4().to_string();
     let hash = auth_service::hash_password(&input.password)?;
-    let school_hash =
-        auth_service::optional_recovery_hash(input.recovery_school.as_deref())?;
+    let school_hash = auth_service::optional_recovery_hash(input.recovery_school.as_deref())?;
     let color_hash = auth_service::optional_recovery_hash(input.recovery_color.as_deref())?;
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
@@ -115,6 +116,17 @@ pub fn create_staff(state: State<'_, AppState>, input: CreateStaffInput) -> Resu
             e.to_string()
         }
     })?;
+
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_STAFF,
+        "create",
+        format!(
+            "Création du personnel « {full_name} » ({})",
+            input.username.trim()
+        ),
+    );
 
     let founder = founder_id(&conn);
     conn.query_row(
@@ -163,6 +175,14 @@ pub fn update_staff(state: State<'_, AppState>, input: UpdateStaffInput) -> Resu
         }
     }
 
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_STAFF,
+        "update",
+        format!("Modification du personnel « {full_name} »"),
+    );
+
     let founder = founder_id(&conn);
     conn.query_row(
         &format!("{STAFF_SELECT} WHERE s.id = ?1"),
@@ -180,11 +200,25 @@ pub fn deactivate_staff(state: State<'_, AppState>, id: String) -> Result<(), St
             return Err("Le premier compte enregistré ne peut pas être désactivé".into());
         }
     }
+    let name: String = conn
+        .query_row(
+            "SELECT TRIM(first_name || ' ' || last_name) FROM staff WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| id.clone());
     let n = conn
         .execute("UPDATE staff SET is_active = 0 WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("Staff introuvable".into());
     }
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_STAFF,
+        "deactivate",
+        format!("Désactivation du personnel « {name} »"),
+    );
     Ok(())
 }
