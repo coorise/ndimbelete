@@ -155,10 +155,16 @@ body::before {
 .table-h-scroll-top {
   max-height: 18px;
   border-bottom: none;
+  flex-shrink: 0;
 }
-.table-h-scroll-body {
-  overflow: auto;
+/* Body must scroll vertically (sticky thead) AND horizontally — override .table-h-scroll */
+.table-h-scroll.table-h-scroll-body {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
   max-height: min(70vh, calc(100dvh - 14rem));
+  min-height: 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .table-h-scroll-body thead th {
@@ -175,6 +181,7 @@ body::before {
 
 .table-h-scroll::-webkit-scrollbar {
   height: 14px;
+  width: 14px;
 }
 .table-h-scroll::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--fg) 8%, transparent);

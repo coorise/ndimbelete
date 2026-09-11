@@ -87,8 +87,8 @@ pub fn Table(
     });
 
     view! {
-        <div class="table-frame flex w-full max-w-full flex-col gap-1">
-            <div class="flex items-center justify-between gap-2">
+        <div class="table-frame flex min-h-0 w-full max-w-full flex-1 flex-col gap-1">
+            <div class="flex shrink-0 items-center justify-between gap-2">
                 <p class="table-scroll-hint min-w-0 flex-1 text-xs font-medium text-[var(--muted)]">
                     "← Faites défiler horizontalement (barre en haut) pour voir toutes les colonnes →"
                 </p>

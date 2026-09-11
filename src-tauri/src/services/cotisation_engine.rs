@@ -163,7 +163,7 @@ pub fn load_periods(conn: &Connection, year_id: &str) -> Result<Vec<Contribution
                     meeting_date, collect_start, collect_end, sort_order, label_color
              FROM contribution_periods
              WHERE year_id = ?1
-             ORDER BY COALESCE(sort_order, period_month), period_month ASC",
+             ORDER BY period_month ASC",
         )
         .map_err(|e| e.to_string())?;
 

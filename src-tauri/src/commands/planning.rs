@@ -41,15 +41,24 @@ pub fn list_planning(state: State<'_, AppState>, year: i32) -> Result<Vec<Planni
     let conn = state.db.lock();
     let year_id = seed_year(&conn, year).map_err(|e| e.to_string())?;
 
+    // Repair drifted sort_order (DEFAULT 0 made edited months sort after untouched ones).
+    let _ = conn.execute(
+        "UPDATE contribution_periods
+         SET sort_order = period_month
+         WHERE year_id = ?1
+           AND (sort_order IS NULL OR sort_order = 0 OR sort_order != period_month)",
+        [&year_id],
+    );
+
     let mut stmt = conn
         .prepare(
             "SELECT p.id, y.year, p.period_month, p.label,
                     p.meeting_date, p.collect_start, p.collect_end,
-                    COALESCE(p.sort_order, p.period_month), p.label_color
+                    p.period_month, p.label_color
              FROM contribution_periods p
              JOIN contribution_years y ON y.id = p.year_id
              WHERE p.year_id = ?1
-             ORDER BY COALESCE(p.sort_order, p.period_month), p.period_month",
+             ORDER BY p.period_month ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -97,7 +106,8 @@ pub fn upsert_planning_period(
         .collect_end
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "15:30".into());
-    let sort = input.sort_order.unwrap_or(input.period_month);
+    // Calendar order is authoritative; keep sort_order aligned with period_month.
+    let sort = input.period_month;
     let color = input
         .label_color
         .as_ref()

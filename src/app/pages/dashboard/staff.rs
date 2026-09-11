@@ -423,9 +423,9 @@ fn StaffTab(
                 </div>
             </Show>
 
-            <div class="min-h-0 flex-1 overflow-auto">
+            <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <Show when=move || view_mode.get() == "grid">
-                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <div class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain pr-1 pb-2 sm:grid-cols-2 xl:grid-cols-3">
                         <For
                             each=move || visible.get()
                             key=|s| s.id.clone()

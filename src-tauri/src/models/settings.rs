@@ -164,12 +164,12 @@ impl Default for AppSettings {
 
 /// Long readable default (plain / markdown markers).
 pub fn default_mini_template_plain() -> String {
-    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
 pub fn default_a4_template_plain() -> String {
-    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}Nouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
@@ -199,7 +199,7 @@ fn plain_to_html_template(plain: &str) -> String {
         .join("")
 }
 
-/// Detect short legacy defaults and upgrade to the long receipt.
+/// Detect legacy receipt templates and upgrade to the year-obligation layout.
 pub fn maybe_upgrade_short_template(current: &str, long_html: &str) -> String {
     let compact: String = current
         .chars()
@@ -211,9 +211,38 @@ pub fn maybe_upgrade_short_template(current: &str, long_html: &str) -> String {
         || (compact.contains("{{user.name}}({{user.card}})")
             && compact.contains("merci")
             && !compact.contains("membre:"));
-    if looks_short || current.trim().is_empty() {
+    let looks_legacy_mid = compact.contains("période:")
+        || compact.contains("periode:")
+        || compact.contains("detteantérieure")
+        || compact.contains("detteanterieure")
+        || (compact.contains("{{remaining_debt}}") && !compact.contains("{{year_total_due}}"));
+    let missing_new_fields = current.trim().is_empty()
+        || !compact.contains("{{year_total_due}}")
+        || !compact.contains("{{payment_date}}")
+        || !compact.contains("{{surplus_line}}");
+    if looks_short || looks_legacy_mid || missing_new_fields {
         long_html.to_string()
     } else {
         current.to_string()
     }
+}
+
+/// True when saved field lines still use the old receipt vocabulary.
+pub fn fields_need_receipt_upgrade(fields: &[ReceiptField]) -> bool {
+    if fields.is_empty() {
+        return true;
+    }
+    let joined = fields
+        .iter()
+        .map(|f| f.content.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let compact: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.contains("detteantérieure")
+        || compact.contains("detteanterieure")
+        || ((compact.contains("période") || compact.contains("periode"))
+            && !compact.contains("datedepaiement"))
+        || !compact.contains("{{year_total_due}}")
+        || !compact.contains("{{payment_date}}")
+        || !compact.contains("{{surplus_line}}")
 }

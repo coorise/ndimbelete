@@ -68,7 +68,7 @@ impl ReceiptContext {
             0.0
         };
         let surplus_line = match p.surplus_received {
-            Some(s) if s > 0.001 => format!("Surplus reçus : {}\n", money(s)),
+            Some(s) if s > 0.001 => format!("Surplus reçus : {}", money(s)),
             _ => String::new(),
         };
         Self {

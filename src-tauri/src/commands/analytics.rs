@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::services::cotisation_engine::period_due_base;
+use crate::services::cotisation_engine::{period_due_base, recalculate_member_year};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,18 +171,77 @@ pub fn get_overview_stats(
         rows
     };
 
-    let total_due: f64 = by_period.iter().map(|p| p.total_due).sum();
-    let total_paid: f64 = by_period.iter().map(|p| p.total_paid).sum();
-    let total_unpaid = (total_due - total_paid).max(0.0);
+    let total_paid_periods: f64 = by_period.iter().map(|p| p.total_paid).sum();
+    let n_periods = by_period.len() as f64;
 
-    // True cumulative curves for the line chart.
-    let mut debt_run = 0.0_f64;
+    // Align with cotisation engine:
+    //   period base = monthly × 2 (bi-monthly)
+    //   year dues    = n_periods × base  (= monthly × 12 when 6 odd months)
+    //   balance      = prior + year_dues − paid − ristourne
+    let (total_paid, total_due, total_unpaid, prior_for_chart) =
+        if let Some(ref mid) = member_filter {
+            let summary = recalculate_member_year(&conn, mid, &year_id)?;
+            (
+                summary.total_paid,
+                summary.total_due,
+                summary.balance, // remaining debt (Excel sign: + debt, − surplus)
+                summary.prior_december_debt,
+            )
+        } else {
+            let members: i64 = conn
+                .query_row(
+                    "SELECT COUNT(DISTINCT e.member_id)
+                     FROM member_period_entries e
+                     JOIN contribution_periods p ON p.id = e.period_id
+                     WHERE p.year_id = ?1",
+                    [&year_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            let year_dues = base * n_periods * members as f64;
+            let prior_debt: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(prior_december_debt), 0)
+                     FROM member_year_meta WHERE year_id = ?1",
+                    [&year_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0.0);
+            let ristourne_sum: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(ristourne), 0)
+                     FROM member_year_meta WHERE year_id = ?1",
+                    [&year_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0.0);
+            // Prefer meta totals when present (refreshed by overview reload).
+            let meta_paid: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(total_paid), 0)
+                     FROM member_year_meta WHERE year_id = ?1",
+                    [&year_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0.0);
+            let paid = if meta_paid > 0.001 {
+                meta_paid
+            } else {
+                total_paid_periods
+            };
+            let balance = prior_debt + year_dues - paid - ristourne_sum;
+            (paid, year_dues, balance, prior_debt)
+        };
+
+    // Running balance curve (same model as cotisations), not sum of period shortfalls.
+    let mut debt_run = prior_for_chart;
     let mut paid_run = 0.0_f64;
     let debt_vs_paid: Vec<DebtVsPaidPoint> = by_period
         .iter()
         .map(|p| {
-            debt_run += p.unpaid;
+            debt_run += base;
             paid_run += p.total_paid;
+            debt_run -= p.total_paid;
             DebtVsPaidPoint {
                 label: p.label.clone(),
                 debt_cumulative: debt_run,

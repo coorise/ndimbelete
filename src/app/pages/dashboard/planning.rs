@@ -92,7 +92,7 @@ pub fn PlanningPage() -> impl IntoView {
             (end, begin)
         };
         let q = search.get().trim().to_lowercase();
-        periods
+        let mut rows = periods
             .get()
             .into_iter()
             .filter(|p| p.period_month >= lo && p.period_month <= hi)
@@ -113,7 +113,9 @@ pub fn PlanningPage() -> impl IntoView {
                         .to_lowercase()
                         .contains(&q)
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|p| p.period_month);
+        rows
     });
 
     let filtered_total = Signal::derive(move || filtered.get().len());
@@ -478,7 +480,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                     .filter(|s| !s.trim().is_empty()),
                                                 collect_end: collect_end
                                                     .filter(|s| !s.trim().is_empty()),
-                                                sort_order: Some(p.sort_order),
+                                                sort_order: Some(p.period_month),
                                                 label_color: p.label_color.clone(),
                                             };
                                             if let Err(e) = api::upsert_planning_period(input).await
@@ -497,7 +499,7 @@ pub fn PlanningPage() -> impl IntoView {
                         </div>
                     </Show>
 
-                    <div class="min-h-0 flex-1 overflow-auto">
+                    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                         <Table class="text-sm" fullscreen_toggle=true>
                             <THead>
                                 <Th>
