@@ -3,9 +3,9 @@ use leptos::task::spawn_local;
 use std::collections::HashMap;
 
 use crate::app::components::ui::{
-    Badge, Button, ButtonVariant, EditableCell, Input, Modal, Select, SelectOption, TabItem, Table,
-    TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td, TextArea, Th, THead,
-    Tr, paginate_slice,
+    Badge, Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, Select, SelectOption,
+    TabItem, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td,
+    TextArea, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
 };
 use crate::app::hooks::use_table_fullscreen;
 use crate::app::lib::{
@@ -195,7 +195,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
     let view_mode = RwSignal::new("table".to_string());
     let page = RwSignal::new(0usize);
     let page_size = RwSignal::new(25usize);
-    let load_mode = RwSignal::new("page".to_string());
+    let load_mode = RwSignal::new(DEFAULT_TABLE_LOAD_MODE.to_string());
     let lazy_count = RwSignal::new(25usize);
     let pending = RwSignal::new(HashMap::<String, String>::new());
     let fs = use_table_fullscreen();
@@ -222,6 +222,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
     Effect::new(move |_| {
         let _ = query.get();
         page.set(0);
+        lazy_count.set(default_lazy_count(page_size.get_untracked()));
         reload();
     });
 
@@ -544,7 +545,13 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
 
             <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <Show when=move || view_mode.get() == "grid">
-                    <div class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain pr-1 pb-2 sm:grid-cols-2 xl:grid-cols-3">
+                    <LazyScrollRegion
+                        mode=load_mode
+                        lazy_count=lazy_count
+                        total=filtered_total
+                        page_size=page_size
+                        class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain pr-1 pb-2 sm:grid-cols-2 xl:grid-cols-3"
+                    >
                         <For
                             each=move || visible.get()
                             key=|m| m.id.clone()
@@ -597,11 +604,17 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                 }
                             }
                         />
-                    </div>
+                    </LazyScrollRegion>
                 </Show>
 
                 <Show when=move || view_mode.get() == "table">
-                    <Table fullscreen_toggle=true>
+                    <Table
+                        fullscreen_toggle=true
+                        lazy_mode=load_mode
+                        lazy_count=lazy_count
+                        lazy_total=filtered_total
+                        lazy_page_size=page_size
+                    >
                         <THead>
                             <Th>
                                 <input

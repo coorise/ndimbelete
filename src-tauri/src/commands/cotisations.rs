@@ -98,8 +98,7 @@ pub fn get_year_grid(state: State<'_, AppState>, year: i32) -> Result<YearGrid, 
     let mut rows = Vec::new();
     for member in members {
         ensure_member_period_entries(&conn, &member.id, &year_row.id, year_row.monthly_amount)?;
-        // Excel-style running debt columns (fixes flat amount_due = monthly×2 defaults).
-        rebuild_running_dues(&conn, &member.id, &year_row.id, year_row.monthly_amount)?;
+        // Do not rebuild_running_dues here — keep Excel / manual debt cells as stored.
         let summary = recalculate_member_year(&conn, &member.id, &year_row.id)?;
 
         let period_cells = load_period_cells(&conn, &member.id, &periods)?;

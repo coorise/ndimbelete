@@ -93,6 +93,7 @@ pub fn run() {
             commands::update_settings,
             // Analytics
             commands::get_overview_stats,
+            commands::list_overview_members,
             // Excel
             commands::preview_excel,
             commands::import_excel,

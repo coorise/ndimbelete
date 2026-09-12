@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use crate::app::components::ui::{
     Button, ButtonVariant, EditableCell, Input, Select, SelectOption, Table, TableFullscreenToggle,
-    TableLoadMode, TablePaginationBar, TBody, Td, Th, THead, Tr, paginate_slice,
+    TableLoadMode, TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE,
+    default_lazy_count, paginate_slice,
 };
 use crate::app::hooks::use_table_fullscreen;
 use crate::app::i18n::use_i18n;
@@ -49,7 +50,7 @@ pub fn PlanningPage() -> impl IntoView {
     let form_open = RwSignal::new(false);
     let page = RwSignal::new(0usize);
     let page_size = RwSignal::new(25usize);
-    let load_mode = RwSignal::new("page".to_string());
+    let load_mode = RwSignal::new(DEFAULT_TABLE_LOAD_MODE.to_string());
     let lazy_count = RwSignal::new(25usize);
 
     // Add / edit form
@@ -199,6 +200,7 @@ pub fn PlanningPage() -> impl IntoView {
                             if let Ok(y) = event_target_value(&ev).parse::<i32>() {
                                 year.set(y);
                                 page.set(0);
+                                lazy_count.set(default_lazy_count(page_size.get_untracked()));
                             }
                         }
                     />
@@ -210,6 +212,7 @@ pub fn PlanningPage() -> impl IntoView {
                     on_input=Callback::new(move |v| {
                         search.set(v);
                         page.set(0);
+                        lazy_count.set(default_lazy_count(page_size.get_untracked()));
                     })
                     class="min-w-[14rem] flex-1"
                 />
@@ -271,6 +274,7 @@ pub fn PlanningPage() -> impl IntoView {
                         on_change=Callback::new(move |v| {
                             begin_month.set(v);
                             page.set(0);
+                            lazy_count.set(default_lazy_count(page_size.get_untracked()));
                         })
                         class="w-40"
                     />
@@ -281,6 +285,7 @@ pub fn PlanningPage() -> impl IntoView {
                         on_change=Callback::new(move |v| {
                             end_month.set(v);
                             page.set(0);
+                            lazy_count.set(default_lazy_count(page_size.get_untracked()));
                         })
                         class="w-40"
                     />
@@ -500,7 +505,14 @@ pub fn PlanningPage() -> impl IntoView {
                     </Show>
 
                     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        <Table class="text-sm" fullscreen_toggle=true>
+                        <Table
+                            class="text-sm"
+                            fullscreen_toggle=true
+                            lazy_mode=load_mode
+                            lazy_count=lazy_count
+                            lazy_total=filtered_total
+                            lazy_page_size=page_size
+                        >
                             <THead>
                                 <Th>
                                     <input

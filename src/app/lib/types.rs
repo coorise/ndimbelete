@@ -477,10 +477,32 @@ pub struct OverviewStats {
     pub exclu_count: i64,
     pub total_paid: f64,
     pub total_due: f64,
+    #[serde(default)]
+    pub total_debt: f64,
+    #[serde(default)]
+    pub total_surplus: f64,
     pub total_unpaid: f64,
     pub by_period: Vec<PeriodSeriesPoint>,
     pub payment_status_pie: Vec<PaymentStatusSlice>,
     pub debt_vs_paid: Vec<DebtVsPaidPoint>,
+    #[serde(default)]
+    pub paid_year_count: i64,
+    #[serde(default)]
+    pub unfulfilled_count: i64,
+    #[serde(default)]
+    pub with_debt_count: i64,
+    #[serde(default)]
+    pub with_surplus_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OverviewMemberRow {
+    pub id: String,
+    pub last_name: String,
+    pub first_name: String,
+    pub card_number: String,
+    pub total_paid: f64,
+    pub balance: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::db::seed_year;
 use crate::models::PERIOD_MONTHS;
 use crate::services::cotisation_engine::{
-    ensure_member_period_entries, period_due_base, rebuild_running_dues, recalculate_member_year,
+    ensure_member_period_entries, period_due_base, recalculate_member_year,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,12 +170,18 @@ fn header_month(cell: &Data) -> Option<i32> {
 
 fn month_from_name(n: &str) -> Option<i32> {
     const PAIRS: &[(&[&str], i32)] = &[
-        (&["JANV", "JANUARY", "JAN"], 1),
-        (&["MARS", "MARCH", "MAR"], 3),
+        (&["JANVIER", "JANUARY", "JANV", "JAN"], 1),
+        (&["FEVRIER", "FEBRUARY", "FEV", "FEB"], 2),
+        (&["MARS", "MARCH"], 3),
+        (&["AVRIL", "APRIL", "AVR", "APR"], 4),
         (&["MAI", "MAY"], 5),
-        (&["JUIL", "JULY", "JUL"], 7),
-        (&["SEPT", "SEPTEMBER", "SEP"], 9),
-        (&["NOVEM", "NOVEMBER", "NOV"], 11),
+        (&["JUIN", "JUNE"], 6),
+        (&["JUILLET", "JULY", "JUIL", "JUL"], 7),
+        (&["AOUT", "AUGUST", "AUG"], 8),
+        (&["SEPTEMBRE", "SEPTEMBER", "SEPT", "SEP"], 9),
+        (&["OCTOBRE", "OCTOBER", "OCT"], 10),
+        (&["NOVEMBRE", "NOVEMBER", "NOVEM", "NOV"], 11),
+        (&["DECEMBRE", "DECEMBER", "DEC"], 12),
     ];
     for (keys, month) in PAIRS {
         if keys.iter().any(|k| n.contains(k)) {
@@ -183,6 +189,92 @@ fn month_from_name(n: &str) -> Option<i32> {
         }
     }
     None
+}
+
+/// Detect planning months (due column of each due/paid pair) from Excel headers.
+pub fn detect_period_months_from_headers(headers: &[String]) -> Vec<(i32, Option<String>)> {
+    let header_cells: Vec<Data> = headers.iter().map(|h| Data::String(h.clone())).collect();
+    detect_period_months_from_cells(&header_cells)
+}
+
+fn detect_period_months_from_cells(header_cells: &[Data]) -> Vec<(i32, Option<String>)> {
+    let headers: Vec<String> = header_cells.iter().map(cell_str).collect();
+    let mut date_like: Vec<(i32, Option<String>)> = Vec::new();
+    for (i, cell) in header_cells.iter().enumerate() {
+        let n = norm_header(&headers[i]);
+        if is_meta_header(&n) {
+            continue;
+        }
+        if let Some(month) = header_month(cell) {
+            let meeting = match cell {
+                Data::DateTimeIso(s) => Some(s.chars().take(10).collect()),
+                Data::String(s) if parse_ymd(s).is_some() => {
+                    let (y, m, d) = parse_ymd(s).unwrap();
+                    Some(format!("{y:04}-{m:02}-{d:02}"))
+                }
+                _ => None,
+            };
+            date_like.push((month, meeting));
+        }
+    }
+    // Pair consecutive due/paid headers → one planning month per pair (use due col month).
+    let mut out = Vec::new();
+    for chunk in date_like.chunks(2) {
+        out.push(chunk[0].clone());
+    }
+    if out.is_empty() {
+        for &m in &PERIOD_MONTHS {
+            out.push((m, None));
+        }
+    }
+    out
+}
+
+/// Create / update contribution_periods so Planning matches Excel months.
+pub fn sync_planning_periods_from_excel(
+    conn: &Connection,
+    year_id: &str,
+    year: i32,
+    periods: &[(i32, Option<String>)],
+) -> Result<(), String> {
+    use crate::models::period_label;
+    for (month, meeting) in periods {
+        if !(1..=12).contains(month) {
+            continue;
+        }
+        let label = period_label(*month).to_string();
+        let meeting_date = meeting
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| format!("{year:04}-{:02}-01", month));
+        let existing: Result<String, _> = conn.query_row(
+            "SELECT id FROM contribution_periods WHERE year_id = ?1 AND period_month = ?2",
+            params![year_id, month],
+            |r| r.get(0),
+        );
+        match existing {
+            Ok(id) => {
+                conn.execute(
+                    "UPDATE contribution_periods
+                     SET label = ?1, meeting_date = ?2, sort_order = ?3
+                     WHERE id = ?4",
+                    params![label, meeting_date, *month, id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Err(_) => {
+                let nid = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO contribution_periods
+                     (id, year_id, period_month, label, meeting_date, collect_start, collect_end, sort_order)
+                     VALUES (?1, ?2, ?3, ?4, ?5, '14:30', '15:30', ?6)",
+                    params![nid, year_id, month, label, meeting_date, *month],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn norm_header(h: &str) -> String {
@@ -593,6 +685,7 @@ fn map_columns_from_headers(headers: &[String]) -> ColMap {
 
 /// Import from an editable grid (preview corrections / failure retries).
 /// When `prune_missing` is true, members absent from `rows` are removed (full sheet sync).
+/// `monthly_amount` sets the cotisation per planning period (default 20 €).
 pub fn import_excel_grid(
     conn: &Connection,
     headers: &[String],
@@ -601,6 +694,7 @@ pub fn import_excel_grid(
     sheet_label: &str,
     role_values: &[String],
     prune_missing: bool,
+    monthly_amount: Option<f64>,
 ) -> Result<ImportResult, String> {
     if headers.is_empty() {
         return Err("En-têtes manquants".into());
@@ -611,13 +705,26 @@ pub fn import_excel_grid(
     }
 
     let year_id = seed_year(conn, year).map_err(|e| e.to_string())?;
-    let monthly: f64 = conn
-        .query_row(
+
+    // Sync Planning months from Excel headers (source of truth).
+    let detected = detect_period_months_from_headers(headers);
+    sync_planning_periods_from_excel(conn, &year_id, year, &detected)?;
+
+    let monthly = if let Some(m) = monthly_amount.filter(|v| *v > 0.0) {
+        conn.execute(
+            "UPDATE contribution_years SET monthly_amount = ?1 WHERE id = ?2",
+            params![m, year_id],
+        )
+        .map_err(|e| e.to_string())?;
+        m
+    } else {
+        conn.query_row(
             "SELECT monthly_amount FROM contribution_years WHERE id = ?1",
             [&year_id],
             |r| r.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+    };
     let base_due = period_due_base(monthly);
 
     let periods: Vec<(String, i32)> = {
@@ -851,7 +958,7 @@ fn import_one_row(
     )
     .map_err(|e| e.to_string())?;
 
-    // Write Excel due/paid; then rebuild_running_dues keeps Excel parity from payments
+    // Write Excel due/paid as-is (custom debt cells preserved).
     for (i, (period_id, _month)) in periods.iter().enumerate() {
         if i >= PERIOD_MONTHS.len() || i >= cols.periods.len() {
             break;
@@ -868,8 +975,7 @@ fn import_one_row(
         .map_err(|e| e.to_string())?;
     }
 
-    // Prefer stored Excel amount_due; rebuild after payments to keep later periods consistent
-    rebuild_running_dues(conn, &member_id, year_id, monthly)?;
+    // Keep Excel debt columns as imported; do not overwrite with formula rebuild.
     recalculate_member_year(conn, &member_id, year_id)?;
     Ok(())
 }

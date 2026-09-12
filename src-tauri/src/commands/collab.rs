@@ -131,6 +131,35 @@ fn login_on_conn(
     Ok(SessionInfo { staff, permissions })
 }
 
+/// After pull/rollback replaces the local DB, keep the session when the same
+/// staff account still exists and is active in the new snapshot.
+fn rebind_session_after_db_replace(
+    state: &State<'_, AppState>,
+    conn: &rusqlite::Connection,
+    previous_staff_id: Option<String>,
+) -> Option<String> {
+    let Some(id) = previous_staff_id else {
+        state.set_session(None);
+        return None;
+    };
+    let active: Result<i64, _> = conn.query_row(
+        "SELECT is_active FROM staff WHERE id = ?1",
+        [&id],
+        |r| r.get(0),
+    );
+    match active {
+        Ok(1) => {
+            // Re-persist so restart restores the same login.
+            state.set_session(Some(id.clone()));
+            Some(id)
+        }
+        _ => {
+            state.set_session(None);
+            None
+        }
+    }
+}
+
 #[tauri::command]
 pub fn collab_disconnect() -> Result<(), String> {
     collab::disconnect().map_err(|e| e.to_string())
@@ -165,10 +194,11 @@ pub fn collab_push(
 
 #[tauri::command]
 pub fn collab_pull(state: State<'_, AppState>) -> Result<CollabStatus, String> {
+    let previous_staff = state.session_staff_id.lock().clone();
     let mut conn = state.db.lock();
-    let status = collab::pull_head(&mut conn).map_err(|e| e.to_string())?;
-    state.set_session(None);
-    Ok(status)
+    collab::pull_head(&mut conn).map_err(|e| e.to_string())?;
+    let staff_id = rebind_session_after_db_replace(&state, &conn, previous_staff);
+    collab::status(&conn, staff_id.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -190,10 +220,11 @@ pub fn collab_rollback(
     state: State<'_, AppState>,
     commit_id: String,
 ) -> Result<CollabStatus, String> {
+    let previous_staff = state.session_staff_id.lock().clone();
     let mut conn = state.db.lock();
-    let status = collab::rollback_to_commit(&mut conn, &commit_id).map_err(|e| e.to_string())?;
-    state.set_session(None);
-    Ok(status)
+    collab::rollback_to_commit(&mut conn, &commit_id).map_err(|e| e.to_string())?;
+    let staff_id = rebind_session_after_db_replace(&state, &conn, previous_staff);
+    collab::status(&conn, staff_id.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

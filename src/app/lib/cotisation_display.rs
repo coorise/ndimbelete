@@ -43,13 +43,20 @@ pub fn is_intuitive_sign(settings_sign: &str) -> bool {
 }
 
 /// Receipt remaining / surplus from year obligation math.
+/// `n_periods` = number of planning periods in the year (typically 6).
 /// Returns `(year_total_due, remaining_to_pay, nouveau_solde_credits, surplus_received)`.
 pub fn receipt_year_figures(
-    monthly_amount: f64,
+    period_amount: f64,
     prior_december_debt: f64,
     total_paid_year: f64,
+    n_periods: i32,
 ) -> (f64, f64, f64, Option<f64>) {
-    let year_total_due = monthly_amount * 12.0;
+    let n = if n_periods > 0 {
+        n_periods as f64
+    } else {
+        6.0
+    };
+    let year_total_due = period_amount * n;
     let prior_debt = prior_december_debt.max(0.0);
     let surplus_prev = (-prior_december_debt).max(0.0);
     let credits = total_paid_year + surplus_prev;
@@ -74,8 +81,38 @@ pub fn today_payment_date() -> String {
     )
 }
 
+/// Format `YYYY-MM-DD` (or similar) as `DD/MM/YYYY`.
+pub fn format_iso_date_fr(iso: &str) -> Option<String> {
+    let parts: Vec<&str> = iso.trim().split('-').collect();
+    if parts.len() < 3 || parts[0].len() != 4 {
+        return None;
+    }
+    let y = parts[0];
+    let m: u32 = parts[1].parse().ok()?;
+    let d_str: String = parts[2]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let d: u32 = d_str.parse().ok()?;
+    Some(format!("{d:02}/{m:02}/{y}"))
+}
+
+/// Prefer meeting date of the paid period; else 01/MM/YYYY from period month.
+pub fn payment_date_for_period(
+    meeting_date: Option<&str>,
+    period_month: i32,
+    year: i32,
+) -> String {
+    meeting_date
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(format_iso_date_fr)
+        .unwrap_or_else(|| format!("01/{:02}/{year}", period_month.clamp(1, 12)))
+}
+
 /// Build a receipt with year-obligation fields for print / preview.
 /// `total_paid_year` must be the raw sum of payments for the year (not including prior surplus).
+/// `payment_date` should be the last real payment date when known.
 pub fn build_payment_receipt(
     member_name: String,
     card_number: String,
@@ -89,9 +126,10 @@ pub fn build_payment_receipt(
     org_address: String,
     monthly_amount: f64,
     prior_december_debt: f64,
+    payment_date: Option<String>,
 ) -> PaymentReceipt {
     let (_year_total, remaining, _credits, _surplus) =
-        receipt_year_figures(monthly_amount, prior_december_debt, total_paid_year);
+        receipt_year_figures(monthly_amount, prior_december_debt, total_paid_year, 6);
     PaymentReceipt {
         member_name,
         card_number,
@@ -106,6 +144,9 @@ pub fn build_payment_receipt(
         org_address,
         monthly_amount,
         prior_december_debt,
-        payment_date: today_payment_date(),
+        payment_date: payment_date
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(today_payment_date),
     }
 }

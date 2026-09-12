@@ -326,6 +326,7 @@ pub fn ImportFailuresModal(
                                     Some(&sheet),
                                     Some(&roles),
                                     false,
+                                    Some(20.0),
                                 )
                                 .await
                                 {
@@ -368,6 +369,7 @@ pub fn ExcelImportModal(
     let sheets = RwSignal::new(Vec::<String>::new());
     let sheet = RwSignal::new(String::new());
     let import_year = RwSignal::new(2026_i32);
+    let monthly_amount = RwSignal::new("20".to_string());
     let headers = RwSignal::new(Vec::<String>::new());
     let preview_rows = RwSignal::new(Vec::<Vec<String>>::new());
     let preview_search = RwSignal::new(String::new());
@@ -388,6 +390,7 @@ pub fn ExcelImportModal(
         sheets.set(Vec::new());
         sheet.set(String::new());
         import_year.set(year.get_untracked());
+        monthly_amount.set("20".into());
         headers.set(Vec::new());
         preview_rows.set(Vec::new());
         preview_search.set(String::new());
@@ -577,8 +580,19 @@ pub fn ExcelImportModal(
                             })
                         />
                     </div>
+                    <div class="flex flex-col gap-1 sm:max-w-xs">
+                        <Input
+                            label="Cotisation par période (€)"
+                            r#type="number"
+                            value=monthly_amount.into()
+                            on_input=Callback::new(move |v| monthly_amount.set(v))
+                        />
+                        <p class="text-xs text-[var(--muted)]">
+                            "Défaut Excel : 20 € par mois de planning (Jan=20, Mar=40 cumul…)."
+                        </p>
+                    </div>
                     <p class="text-xs text-[var(--muted)]">
-                        "L'import crée / met à jour l'année choisie et ses périodes de planning (cotisations)."
+                        "L'import crée / met à jour l'année, le montant par période, et les mois de planning d'après les colonnes du fichier."
                     </p>
                 </Show>
 
@@ -673,6 +687,12 @@ pub fn ExcelImportModal(
                             let roles = selected_roles.get_untracked();
                             let hdrs = headers.get_untracked();
                             let rows = preview_rows.get_untracked();
+                            let monthly = monthly_amount
+                                .get_untracked()
+                                .replace(',', ".")
+                                .parse::<f64>()
+                                .ok()
+                                .filter(|v| *v > 0.0);
                             if hdrs.is_empty() || rows.is_empty() {
                                 message.set(None);
                                 success.set(None);
@@ -702,6 +722,7 @@ pub fn ExcelImportModal(
                                     Some(&s),
                                     Some(&roles),
                                     true,
+                                    monthly,
                                 )
                                 .await
                                 {

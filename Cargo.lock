@@ -3068,7 +3068,7 @@ dependencies = [
 
 [[package]]
 name = "ndimbelente"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3103,7 +3103,7 @@ dependencies = [
 
 [[package]]
 name = "ndimbelente-ui"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "chrono",
  "console_error_panic_hook",

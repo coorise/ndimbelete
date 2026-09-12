@@ -11,15 +11,21 @@ pub struct PeriodInfo {
     pub label: String,
 }
 
-/// French short labels for the six bi-monthly periods.
+/// French labels for planning months (1–12).
 pub fn period_label(month: i32) -> &'static str {
     match month {
         1 => "Janvier",
+        2 => "Février",
         3 => "Mars",
+        4 => "Avril",
         5 => "Mai",
+        6 => "Juin",
         7 => "Juillet",
+        8 => "Août",
         9 => "Septembre",
+        10 => "Octobre",
         11 => "Novembre",
+        12 => "Décembre",
         _ => "Inconnu",
     }
 }
