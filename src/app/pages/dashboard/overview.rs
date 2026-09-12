@@ -2,11 +2,11 @@ use chrono::Datelike;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::app::components::ui::{Card, SearchableSelect, SelectOption};
+use crate::app::components::ui::{Card, MultiSelect, SearchableSelect, SelectOption};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
     api, format_stored_money, is_intuitive_sign, DebtVsPaidPoint, Member, OverviewStats,
-    PaymentStatusSlice, PeriodSeriesPoint,
+    PaymentStatusSlice, PeriodSeriesPoint, PlanningPeriod,
 };
 
 fn money(v: f64) -> String {
@@ -58,6 +58,9 @@ pub fn OverviewPage() -> impl IntoView {
     let intuitive = Signal::derive(move || is_intuitive_sign(&debt_sign.get()));
     // Cohort filter: "", "paid", "unfulfilled", "debt", "surplus"
     let status_filter = RwSignal::new(String::new());
+    /// Empty = whole year; otherwise planning period months (1–12) as strings.
+    let period_months = RwSignal::new(Vec::<String>::new());
+    let planning = RwSignal::new(Vec::<PlanningPeriod>::new());
 
     let reload = move || {
         let y = year.get_untracked();
@@ -65,15 +68,31 @@ pub fn OverviewPage() -> impl IntoView {
         let mid_opt = if mid.is_empty() { None } else { Some(mid) };
         let sf = status_filter.get_untracked();
         let sf_opt = if sf.is_empty() { None } else { Some(sf) };
+        let mut months: Vec<i32> = period_months
+            .get_untracked()
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .filter(|m| (1..=12).contains(m))
+            .collect();
+        months.sort_unstable();
+        months.dedup();
         loading.set(true);
         spawn_local(async move {
             let _ = api::ensure_year(y).await;
             // Heal demissionnaire flags only — do not wipe Excel debt cells.
             let _ = api::recalculate_all_members(y).await;
+            if let Ok(list) = api::list_planning(y).await {
+                planning.set(list);
+            }
             if let Ok(s) = api::get_settings().await {
                 debt_sign.set(s.debt_display_sign);
             }
-            match api::get_overview_stats(y, mid_opt.as_deref(), sf_opt.as_deref()).await {
+            let pm = if months.is_empty() {
+                None
+            } else {
+                Some(months.as_slice())
+            };
+            match api::get_overview_stats(y, mid_opt.as_deref(), sf_opt.as_deref(), pm).await {
                 Ok(s) => {
                     stats.set(Some(s));
                     error.set(None);
@@ -91,6 +110,7 @@ pub fn OverviewPage() -> impl IntoView {
         let _ = year.get();
         let _ = member_id.get();
         let _ = status_filter.get();
+        let _ = period_months.get();
         selected_period.set(None);
         selected_pie.set(None);
         tooltip.set(None);
@@ -119,12 +139,37 @@ pub fn OverviewPage() -> impl IntoView {
         opts
     });
 
+    let month_options = Signal::derive(move || {
+        let mut opts = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for p in planning.get() {
+            if seen.insert(p.period_month) {
+                opts.push(SelectOption {
+                    value: p.period_month.to_string(),
+                    label: format!("{} ({})", p.label, p.period_month),
+                });
+            }
+        }
+        opts
+    });
+
     view! {
         <div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pr-3 pb-4">
             <div class="shrink-0 space-y-3">
                 <div>
                     <h1 class="font-display text-3xl font-semibold">{move || i18n.t("overview.title")}</h1>
-                    <p class="text-[var(--muted)]">"Indicateurs de cotisation pour l'année sélectionnée."</p>
+                    <p class="text-[var(--muted)]">
+                        {move || {
+                            let n = period_months.get().len();
+                            if n == 0 {
+                                "Indicateurs de cotisation pour l'année sélectionnée.".to_string()
+                            } else if n == 1 {
+                                "Indicateurs de cotisation pour le mois de planning sélectionné.".to_string()
+                            } else {
+                                format!("Indicateurs de cotisation pour {n} mois de planning sélectionnés.")
+                            }
+                        }}
+                    </p>
                 </div>
                 <div class="flex flex-row flex-wrap items-end gap-3">
                     <label class="flex flex-col gap-1 text-sm font-medium">
@@ -135,11 +180,20 @@ pub fn OverviewPage() -> impl IntoView {
                             prop:value=move || year.get()
                             on:change=move |ev| {
                                 if let Ok(y) = event_target_value(&ev).parse::<i32>() {
+                                    period_months.set(Vec::new());
                                     year.set(y);
                                 }
                             }
                         />
                     </label>
+                    <MultiSelect
+                        label="Mois (planning)"
+                        options=month_options
+                        value=period_months.into()
+                        on_change=Callback::new(move |v| period_months.set(v))
+                        class="w-52"
+                        empty_label="Toute l'année"
+                    />
                     <SearchableSelect
                         label="Membre"
                         options=member_options
@@ -165,7 +219,11 @@ pub fn OverviewPage() -> impl IntoView {
                             >
                                 {move || {
                                     let n = stats.get().map(|s| s.paid_year_count).unwrap_or(0);
-                                    format!("Soldés ({n})")
+                                    if period_months.get().is_empty() {
+                                        format!("Soldés ({n})")
+                                    } else {
+                                        format!("Payés ({n})")
+                                    }
                                 }}
                             </button>
                             <button
@@ -181,7 +239,11 @@ pub fn OverviewPage() -> impl IntoView {
                             >
                                 {move || {
                                     let n = stats.get().map(|s| s.unfulfilled_count).unwrap_or(0);
-                                    format!("Non soldés ({n})")
+                                    if period_months.get().is_empty() {
+                                        format!("Non soldés ({n})")
+                                    } else {
+                                        format!("Non payés ({n})")
+                                    }
                                 }}
                             </button>
                             <button
@@ -304,9 +366,25 @@ pub fn OverviewPage() -> impl IntoView {
                                 <StatCard label="Actifs".to_string() value=s.active_count.to_string() />
                                 <StatCard label="Démissionnaires".to_string() value=s.demissionnaire_count.to_string() />
                                 <StatCard label="Total payé".to_string() value=money(s.total_paid) />
-                                <StatCard label="Total dû (périodes)".to_string() value=money(s.total_due) />
                                 <StatCard
-                                    label="Dette restante(inclut années précédentes)".to_string()
+                                    label={
+                                        let n = s.period_months.len();
+                                        if n == 0 {
+                                            "Total dû (périodes)".to_string()
+                                        } else if n == 1 {
+                                            "Total dû (mois)".to_string()
+                                        } else {
+                                            format!("Total dû ({n} mois)")
+                                        }
+                                    }
+                                    value=money(s.total_due)
+                                />
+                                <StatCard
+                                    label=if s.period_months.is_empty() {
+                                        "Dette restante(inclut années précédentes)".to_string()
+                                    } else {
+                                        "Dette à date (inclut années précédentes)".to_string()
+                                    }
                                     value=format!("{debt_label} €")
                                 />
                                 <StatCard label="Surplus (membres en avance)".to_string() value=format!("{surplus_label} €") />

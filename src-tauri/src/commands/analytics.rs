@@ -51,6 +51,12 @@ pub struct OverviewStats {
     pub with_debt_count: i64,
     #[serde(default)]
     pub with_surplus_count: i64,
+    /// Selected planning months (1–12). Empty = whole year.
+    #[serde(default)]
+    pub period_months: Vec<i32>,
+    /// Legacy: first selected month, or None when whole year / multi.
+    #[serde(default)]
+    pub period_month: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,10 +74,13 @@ struct MemberSnap {
     id: String,
     status: String,
     prior: f64,
+    /// Paid amount in scope (year total or selected months).
     paid: f64,
+    #[allow(dead_code)]
     ristourne: f64,
     paid_periods: i64,
     total_periods: i64,
+    /// Balance in scope (year-end or as-of max selected month).
     balance: f64,
 }
 
@@ -89,12 +98,35 @@ fn matches_cohort(s: &MemberSnap, cohort: &str) -> bool {
     }
 }
 
+fn normalize_months(raw: Option<Vec<i32>>) -> Vec<i32> {
+    let mut out: Vec<i32> = raw
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| (1..=12).contains(m))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Running Excel debt after payment for the last period ≤ `as_of`.
+fn balance_as_of_cells(period_cells: &[(i32, f64, f64)], as_of: i32, prior: f64, ristourne: f64) -> f64 {
+    period_cells
+        .iter()
+        .filter(|(pm, _, _)| *pm <= as_of)
+        .last()
+        .map(|(_, due, paid)| due - paid)
+        .unwrap_or(prior - ristourne)
+}
+
 #[tauri::command]
 pub fn get_overview_stats(
     state: State<'_, AppState>,
     year: i32,
     member_id: Option<String>,
     status_filter: Option<String>,
+    period_months: Option<Vec<i32>>,
+    period_month: Option<i32>,
 ) -> Result<OverviewStats, String> {
     let conn = state.db.lock();
 
@@ -107,25 +139,47 @@ pub fn get_overview_stats(
         .map_err(|_| format!("Année {year} introuvable"))?;
 
     let base = period_due_base(monthly);
-    let n_periods: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM contribution_periods WHERE year_id = ?1",
-            [&year_id],
-            |r| r.get(0),
-        )
-        .unwrap_or(6)
-        .max(1);
-    let year_dues_one = base * n_periods as f64;
     let cohort = status_filter
         .as_deref()
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
 
+    let mut months = normalize_months(period_months);
+    if months.is_empty() {
+        if let Some(m) = period_month.filter(|m| (1..=12).contains(m)) {
+            months.push(m);
+        }
+    }
+    let month_scope = !months.is_empty();
+    let as_of = months.iter().copied().max();
+
     let member_filter = member_id
         .as_ref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+
+    let mut periods_stmt = conn
+        .prepare(
+            "SELECT p.id, p.period_month, p.label
+             FROM contribution_periods p
+             WHERE p.year_id = ?1
+             ORDER BY p.period_month",
+        )
+        .map_err(|e| e.to_string())?;
+    let period_rows: Vec<(String, i32, String)> = periods_stmt
+        .query_map([&year_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let n_periods = period_rows.len().max(1) as i64;
+    let year_dues_one = base * n_periods as f64;
+    let scope_period_count = if month_scope {
+        months.len().max(1) as i64
+    } else {
+        n_periods
+    };
 
     let mut snaps: Vec<MemberSnap> = Vec::new();
     {
@@ -153,30 +207,70 @@ pub fn get_overview_stats(
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
-            let (id, status, prior, paid, ristourne) = row.map_err(|e| e.to_string())?;
+            let (id, status, prior, year_paid, ristourne) = row.map_err(|e| e.to_string())?;
             if let Some(ref mid) = member_filter {
                 if &id != mid {
                     continue;
                 }
             }
-            let (paid_periods, total_periods): (i64, i64) = conn
-                .query_row(
-                    "SELECT
-                        SUM(CASE WHEN e.amount_paid IS NOT NULL AND e.amount_paid > 0.001 THEN 1 ELSE 0 END),
-                        COUNT(*)
-                     FROM member_period_entries e
-                     JOIN contribution_periods p ON p.id = e.period_id
-                     WHERE p.year_id = ?1 AND e.member_id = ?2",
-                    rusqlite::params![year_id, id],
-                    |r| {
-                        Ok((
-                            r.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                            r.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                        ))
-                    },
-                )
-                .unwrap_or((0, 0));
-            let balance = prior + year_dues_one - paid - ristourne;
+
+            let period_cells: Vec<(i32, f64, f64)> = {
+                let mut st = conn
+                    .prepare(
+                        "SELECT p.period_month,
+                                COALESCE(e.amount_due, 0),
+                                COALESCE(e.amount_paid, 0)
+                         FROM contribution_periods p
+                         LEFT JOIN member_period_entries e
+                           ON e.period_id = p.id AND e.member_id = ?2
+                         WHERE p.year_id = ?1
+                         ORDER BY p.period_month",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = st
+                    .query_map(rusqlite::params![year_id, id], |r| {
+                        Ok((r.get::<_, i32>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))
+                    })
+                    .map_err(|e| e.to_string())?;
+                let mut out = Vec::new();
+                for row in rows {
+                    out.push(row.map_err(|e| e.to_string())?);
+                }
+                out
+            };
+
+            let (paid, paid_periods, total_periods, balance) = if month_scope {
+                let paid_amt: f64 = period_cells
+                    .iter()
+                    .filter(|(pm, _, _)| months.contains(pm))
+                    .map(|(_, _, p)| *p)
+                    .sum();
+                let paid_flag = months
+                    .iter()
+                    .filter(|m| {
+                        period_cells
+                            .iter()
+                            .any(|(pm, _, p)| pm == *m && *p > 0.001)
+                    })
+                    .count() as i64;
+                let total = months.len() as i64;
+                let bal = balance_as_of_cells(
+                    &period_cells,
+                    as_of.unwrap_or(12),
+                    prior,
+                    ristourne,
+                );
+                (paid_amt, paid_flag, total, bal)
+            } else {
+                let paid_periods = period_cells
+                    .iter()
+                    .filter(|(_, _, p)| *p > 0.001)
+                    .count() as i64;
+                let total_periods = period_cells.len() as i64;
+                let bal = prior + year_dues_one - year_paid - ristourne;
+                (year_paid, paid_periods, total_periods, bal)
+            };
+
             snaps.push(MemberSnap {
                 id,
                 status,
@@ -217,61 +311,72 @@ pub fn get_overview_stats(
     let exclu_count = selected.iter().filter(|s| s.status == "exclu").count() as i64;
 
     let total_paid: f64 = selected.iter().map(|s| s.paid).sum();
-    let total_due = year_dues_one * member_count as f64;
     let total_debt: f64 = selected.iter().map(|s| s.balance.max(0.0)).sum();
     let total_surplus: f64 = selected.iter().map(|s| (-s.balance).max(0.0)).sum();
     let prior_sum: f64 = selected.iter().map(|s| s.prior).sum();
 
-    let mut periods_stmt = conn
-        .prepare(
-            "SELECT p.id, p.period_month, p.label
-             FROM contribution_periods p
-             WHERE p.year_id = ?1
-             ORDER BY p.period_month",
-        )
-        .map_err(|e| e.to_string())?;
-    let period_rows: Vec<(String, i32, String)> = periods_stmt
-        .query_map([&year_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    // KPI "dû" = members × period base × scoped periods (never Excel running dues).
+    let total_due = base * scope_period_count as f64 * member_count as f64;
 
-    let by_period: Vec<PeriodSeriesPoint> = period_rows
-        .iter()
-        .map(|(pid, month, label)| {
-            let mut paid_sum = 0.0_f64;
-            if !selected_ids.is_empty() {
-                if let Ok(mut st) = conn.prepare(
-                    "SELECT e.member_id, COALESCE(e.amount_paid, 0)
-                     FROM member_period_entries e
-                     WHERE e.period_id = ?1",
-                ) {
-                    if let Ok(rows) =
-                        st.query_map([pid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
-                    {
-                        for row in rows.flatten() {
-                            let (mid, paid) = row;
-                            if selected_ids.contains(&mid) {
-                                paid_sum += paid;
+    let periods_for_chart: Vec<(String, i32, String)> = if month_scope {
+        period_rows
+            .iter()
+            .filter(|(_, month, _)| months.contains(month))
+            .cloned()
+            .collect()
+    } else {
+        period_rows.clone()
+    };
+
+    let periods_for_curve: Vec<(String, i32, String)> = match as_of {
+        Some(m) => period_rows
+            .iter()
+            .filter(|(_, month, _)| *month <= m)
+            .cloned()
+            .collect(),
+        None => period_rows.clone(),
+    };
+
+    let chart_points = |rows: &[(String, i32, String)]| -> Vec<PeriodSeriesPoint> {
+        rows.iter()
+            .map(|(pid, month, label)| {
+                let mut paid_sum = 0.0_f64;
+                if !selected_ids.is_empty() {
+                    if let Ok(mut st) = conn.prepare(
+                        "SELECT e.member_id, COALESCE(e.amount_paid, 0)
+                         FROM member_period_entries e
+                         WHERE e.period_id = ?1",
+                    ) {
+                        if let Ok(qrows) = st.query_map([pid], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
+                        }) {
+                            for row in qrows.flatten() {
+                                let (mid, paid) = row;
+                                if selected_ids.contains(&mid) {
+                                    paid_sum += paid;
+                                }
                             }
                         }
                     }
                 }
-            }
-            let due = selected_ids.len() as f64 * base;
-            PeriodSeriesPoint {
-                period_month: *month,
-                label: label.clone(),
-                total_due: due,
-                total_paid: paid_sum,
-                unpaid: (due - paid_sum).max(0.0),
-            }
-        })
-        .collect();
+                let due_sum = selected_ids.len() as f64 * base;
+                PeriodSeriesPoint {
+                    period_month: *month,
+                    label: label.clone(),
+                    total_due: due_sum,
+                    total_paid: paid_sum,
+                    unpaid: (due_sum - paid_sum).max(0.0),
+                }
+            })
+            .collect()
+    };
+
+    let by_period = chart_points(&periods_for_chart);
+    let curve_period = chart_points(&periods_for_curve);
 
     let mut bal_run = prior_sum;
     let mut paid_run = 0.0_f64;
-    let debt_vs_paid: Vec<DebtVsPaidPoint> = by_period
+    let debt_vs_paid: Vec<DebtVsPaidPoint> = curve_period
         .iter()
         .map(|p| {
             bal_run += p.total_due;
@@ -298,7 +403,11 @@ pub fn get_overview_stats(
 
     let payment_status_pie = vec![
         PaymentStatusSlice {
-            label: "Soldé".into(),
+            label: if month_scope {
+                "Payé".into()
+            } else {
+                "Soldé".into()
+            },
             count: fully_paid,
         },
         PaymentStatusSlice {
@@ -329,6 +438,12 @@ pub fn get_overview_stats(
         unfulfilled_count,
         with_debt_count,
         with_surplus_count,
+        period_months: months.clone(),
+        period_month: if months.len() == 1 {
+            months.first().copied()
+        } else {
+            None
+        },
     })
 }
 

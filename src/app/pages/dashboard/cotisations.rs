@@ -6,9 +6,10 @@ use wasm_bindgen::JsCast;
 
 use crate::app::components::cotisations::{ExcelImportModal, PaymentModal, ReceiptDialog};
 use crate::app::components::ui::{
-    Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, RowDensitySlider, Select,
-    SelectOption, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, TBody, Td, Th,
-    THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
+    Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, MultiSelect,
+    RowDensitySlider, Select, SelectOption, Table, TableFullscreenToggle, TableLoadMode,
+    TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count,
+    paginate_slice,
 };
 use crate::app::hooks::use_table_fullscreen;
 use crate::app::i18n::use_i18n;
@@ -37,6 +38,72 @@ fn period_paid(c: &crate::app::lib::PeriodCell) -> bool {
 
 fn period_unpaid(c: &crate::app::lib::PeriodCell) -> bool {
     !period_paid(c)
+}
+
+/// Excel running debt after that period's payment (not a sum of cumulative dues).
+fn balance_as_of(row: &YearGridRow, as_of_month: Option<i32>) -> f64 {
+    let Some(m) = as_of_month else {
+        return row.balance;
+    };
+    row.periods
+        .iter()
+        .filter(|c| c.period_month <= m)
+        .last()
+        .map(|c| c.amount_due - c.amount_paid.unwrap_or(0.0))
+        .unwrap_or(row.prior_december_debt - row.ristourne)
+}
+
+fn parse_selected_months(raw: &[String]) -> Vec<i32> {
+    let mut months: Vec<i32> = raw
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .filter(|m| (1..=12).contains(m))
+        .collect();
+    months.sort_unstable();
+    months.dedup();
+    months
+}
+
+fn months_as_of(months: &[i32]) -> Option<i32> {
+    months.iter().copied().max()
+}
+
+fn row_paid_for_months(row: &YearGridRow, months: &[i32]) -> bool {
+    if months.is_empty() {
+        !row.periods.is_empty() && row.periods.iter().all(period_paid)
+    } else {
+        months.iter().all(|m| {
+            row.periods
+                .iter()
+                .find(|c| c.period_month == *m)
+                .map(period_paid)
+                .unwrap_or(false)
+        })
+    }
+}
+
+fn row_unpaid_for_months(row: &YearGridRow, months: &[i32]) -> bool {
+    if months.is_empty() {
+        row.periods.is_empty() || row.periods.iter().any(period_unpaid)
+    } else {
+        !row_paid_for_months(row, months)
+    }
+}
+
+fn payment_method_rank(pm: &str) -> u8 {
+    match pm {
+        "bank_transfer" | "bank" | "virement" => 0,
+        "none" | "aucun" => 2,
+        _ => 1,
+    }
+}
+
+fn payment_method_label(pm: &str) -> &'static str {
+    match pm {
+        "bank_transfer" | "bank" | "virement" => "Banque",
+        "none" | "aucun" => "Aucun",
+        _ => "Espèces",
+    }
 }
 
 fn cotisation_chip_class(active: bool) -> &'static str {
@@ -76,6 +143,7 @@ enum SortKey {
     Carte,
     Nom,
     Prenom,
+    Payment,
     Prior,
     Total,
     Balance,
@@ -110,10 +178,12 @@ pub fn CotisationsPage() -> impl IntoView {
 
     let search = RwSignal::new(String::new());
     let payment_filter = RwSignal::new(String::new());
-    let period_filter = RwSignal::new(String::new());
+    let period_filter = RwSignal::new(Vec::<String>::new());
+    let pay_method_filter = RwSignal::new(String::new()); // "" | bank_transfer | cash
     let current_period = RwSignal::new(String::new()); // period id
 
-    let sort_key = RwSignal::new(SortKey::Nom);
+    let sort_key = RwSignal::new(SortKey::Payment);
+    let sort_secondary = RwSignal::new(SortKey::Nom);
     let sort_asc = RwSignal::new(true);
 
     let view_open = RwSignal::new(false);
@@ -254,6 +324,7 @@ pub fn CotisationsPage() -> impl IntoView {
         if sort_key.get_untracked() == key {
             sort_asc.update(|v| *v = !*v);
         } else {
+            sort_secondary.set(sort_key.get_untracked());
             sort_key.set(key);
             sort_asc.set(true);
         }
@@ -285,16 +356,16 @@ pub fn CotisationsPage() -> impl IntoView {
     });
 
     let period_filter_options = Signal::derive(move || {
-        let mut opts = vec![SelectOption {
-            value: String::new(),
-            label: i18n.t("cotisations.period_all"),
-        }];
+        let mut opts = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         if let Some(g) = grid.get() {
             for p in g.periods {
-                opts.push(SelectOption {
-                    value: p.id,
-                    label: p.label,
-                });
+                if seen.insert(p.period_month) {
+                    opts.push(SelectOption {
+                        value: p.period_month.to_string(),
+                        label: format!("{} ({})", p.label, p.period_month),
+                    });
+                }
             }
         }
         opts
@@ -342,9 +413,12 @@ pub fn CotisationsPage() -> impl IntoView {
     let filtered_rows = Signal::derive(move || {
         let q = search.get().trim().to_lowercase();
         let pf = payment_filter.get();
-        let period_id = period_filter.get();
+        let months = parse_selected_months(&period_filter.get());
+        let pm_filter = pay_method_filter.get();
         let key = sort_key.get();
+        let secondary = sort_secondary.get();
         let asc = sort_asc.get();
+        let as_of = months_as_of(&months);
 
         let mut rows = grid
             .get()
@@ -359,52 +433,34 @@ pub fn CotisationsPage() -> impl IntoView {
                 if !matches_q {
                     return false;
                 }
+                if !pm_filter.is_empty() {
+                    let pm = row.member.payment_method.as_str();
+                    let ok = match pm_filter.as_str() {
+                        "bank_transfer" => {
+                            matches!(pm, "bank_transfer" | "bank" | "virement")
+                        }
+                        "cash" => {
+                            !matches!(pm, "bank_transfer" | "bank" | "virement" | "none" | "aucun")
+                        }
+                        _ => true,
+                    };
+                    if !ok {
+                        return false;
+                    }
+                }
+                let bal = balance_as_of(row, as_of);
                 match pf.as_str() {
-                    "debt" => {
-                        if period_id.is_empty() {
-                            row.balance > 0.001
-                        } else {
-                            row.periods.iter().any(|c| {
-                                c.period_id == period_id && period_unpaid(c) && c.amount_due > 0.001
-                            })
-                        }
-                    }
-                    "surplus" => row.balance < -0.001,
-                    "paid" => {
-                        if period_id.is_empty() {
-                            !row.periods.is_empty() && row.periods.iter().all(period_paid)
-                        } else {
-                            row.periods
-                                .iter()
-                                .any(|c| c.period_id == period_id && period_paid(c))
-                        }
-                    }
-                    "unpaid" | "unfulfilled" => {
-                        if period_id.is_empty() {
-                            row.periods.is_empty() || row.periods.iter().any(period_unpaid)
-                        } else {
-                            row.periods
-                                .iter()
-                                .any(|c| c.period_id == period_id && period_unpaid(c))
-                        }
-                    }
-                    _ => {
-                        // Period-only filter: keep members that have an entry for that period
-                        // (always true) — still apply when combined with search above.
-                        // When a period is chosen without payment status, show rows with
-                        // activity focus: any due/paid cell for that period exists.
-                        if period_id.is_empty() {
-                            true
-                        } else {
-                            row.periods.iter().any(|c| c.period_id == period_id)
-                        }
-                    }
+                    "debt" => bal > 0.001,
+                    "surplus" => bal < -0.001,
+                    "paid" => row_paid_for_months(row, &months),
+                    "unpaid" | "unfulfilled" => row_unpaid_for_months(row, &months),
+                    _ => true,
                 }
             })
             .collect::<Vec<_>>();
 
-        rows.sort_by(|a, b| {
-            let ord = match key {
+        let cmp_key = |a: &YearGridRow, b: &YearGridRow, key: SortKey| -> std::cmp::Ordering {
+            match key {
                 SortKey::Carte => a.member.card_number.cmp(&b.member.card_number),
                 SortKey::Nom => a
                     .member
@@ -416,6 +472,8 @@ pub fn CotisationsPage() -> impl IntoView {
                     .first_name
                     .to_lowercase()
                     .cmp(&b.member.first_name.to_lowercase()),
+                SortKey::Payment => payment_method_rank(&a.member.payment_method)
+                    .cmp(&payment_method_rank(&b.member.payment_method)),
                 SortKey::Prior => a
                     .prior_december_debt
                     .partial_cmp(&b.prior_december_debt)
@@ -424,10 +482,11 @@ pub fn CotisationsPage() -> impl IntoView {
                     .total_paid
                     .partial_cmp(&b.total_paid)
                     .unwrap_or(std::cmp::Ordering::Equal),
-                SortKey::Balance => a
-                    .balance
-                    .partial_cmp(&b.balance)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                SortKey::Balance => {
+                    let ab = balance_as_of(a, as_of);
+                    let bb = balance_as_of(b, as_of);
+                    ab.partial_cmp(&bb).unwrap_or(std::cmp::Ordering::Equal)
+                }
                 SortKey::PeriodDue(i) => {
                     let av = a.periods.get(i).map(|c| c.amount_due).unwrap_or(0.0);
                     let bv = b.periods.get(i).map(|c| c.amount_due).unwrap_or(0.0);
@@ -438,12 +497,23 @@ pub fn CotisationsPage() -> impl IntoView {
                     let bv = b.periods.get(i).and_then(|c| c.amount_paid).unwrap_or(-1.0);
                     av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal)
                 }
-            };
-            if asc {
-                ord
-            } else {
-                ord.reverse()
             }
+        };
+
+        rows.sort_by(|a, b| {
+            let mut ord = cmp_key(a, b, key);
+            if !asc {
+                ord = ord.reverse();
+            }
+            if ord == std::cmp::Ordering::Equal && secondary != key {
+                let mut sec = cmp_key(a, b, secondary);
+                // Secondary always ascending for stable name/bank grouping.
+                if key == SortKey::Payment {
+                    sec = cmp_key(a, b, secondary);
+                }
+                ord = sec;
+            }
+            ord
         });
 
         rows
@@ -453,20 +523,22 @@ pub fn CotisationsPage() -> impl IntoView {
 
     let status_counts = Signal::derive(move || {
         let rows = grid.get().map(|g| g.rows).unwrap_or_default();
+        let months = parse_selected_months(&period_filter.get());
+        let as_of = months_as_of(&months);
         let mut paid = 0i64;
         let mut unpaid = 0i64;
         let mut debt = 0i64;
         let mut surplus = 0i64;
         for row in &rows {
-            let solde = !row.periods.is_empty() && row.periods.iter().all(period_paid);
-            if solde {
+            if row_paid_for_months(row, &months) {
                 paid += 1;
             } else {
                 unpaid += 1;
             }
-            if row.balance > 0.001 {
+            let bal = balance_as_of(row, as_of);
+            if bal > 0.001 {
                 debt += 1;
-            } else if row.balance < -0.001 {
+            } else if bal < -0.001 {
                 surplus += 1;
             }
         }
@@ -481,15 +553,37 @@ pub fn CotisationsPage() -> impl IntoView {
     let filtered_money_stats = Signal::derive(move || {
         let rows = filtered_rows.get();
         let g = grid.get();
-        let n_periods = g
-            .as_ref()
-            .map(|g| g.periods.len().max(1))
-            .unwrap_or(1) as f64;
+        let months = parse_selected_months(&period_filter.get());
         let monthly_amt = g.as_ref().map(|g| g.year.monthly_amount).unwrap_or(20.0);
-        let received: f64 = rows.iter().map(|r| r.total_paid).sum();
-        let expected = rows.len() as f64 * monthly_amt * n_periods;
-        let debt: f64 = rows.iter().map(|r| r.balance.max(0.0)).sum();
-        let surplus: f64 = rows.iter().map(|r| (-r.balance).max(0.0)).sum();
+        let as_of = months_as_of(&months);
+        let n_scope = if months.is_empty() {
+            g.as_ref().map(|g| g.periods.len().max(1)).unwrap_or(1) as f64
+        } else {
+            months.len() as f64
+        };
+        // Expected due = members × monthly × scoped periods (never Excel running dues).
+        let expected = rows.len() as f64 * monthly_amt * n_scope;
+        let received: f64 = if months.is_empty() {
+            rows.iter().map(|r| r.total_paid).sum()
+        } else {
+            rows.iter()
+                .map(|r| {
+                    r.periods
+                        .iter()
+                        .filter(|c| months.contains(&c.period_month))
+                        .map(|c| c.amount_paid.unwrap_or(0.0))
+                        .sum::<f64>()
+                })
+                .sum()
+        };
+        let debt: f64 = rows
+            .iter()
+            .map(|r| balance_as_of(r, as_of).max(0.0))
+            .sum();
+        let surplus: f64 = rows
+            .iter()
+            .map(|r| (-balance_as_of(r, as_of)).max(0.0))
+            .sum();
         (received, expected, debt, surplus)
     });
 
@@ -581,6 +675,17 @@ pub fn CotisationsPage() -> impl IntoView {
                         }
                     />
                 </label>
+                <MultiSelect
+                    label="Mois (planning)"
+                    options=period_filter_options
+                    value=period_filter.into()
+                    on_change=Callback::new(move |v| {
+                        period_filter.set(v);
+                        reset_lazy_window();
+                    })
+                    class="w-52"
+                    empty_label="Toute l'année"
+                />
                 <div class="relative w-52 max-w-full shrink-0">
                     <Input
                         label="Recherche"
@@ -621,7 +726,14 @@ pub fn CotisationsPage() -> impl IntoView {
                                 reset_lazy_window();
                             }
                         >
-                            {move || format!("Soldés ({})", status_counts.get().0)}
+                            {move || {
+                                let n = status_counts.get().0;
+                                if period_filter.get().is_empty() {
+                                    format!("Soldés ({n})")
+                                } else {
+                                    format!("Payés ({n})")
+                                }
+                            }}
                         </button>
                         <button
                             type="button"
@@ -635,7 +747,14 @@ pub fn CotisationsPage() -> impl IntoView {
                                 reset_lazy_window();
                             }
                         >
-                            {move || format!("Non soldés ({})", status_counts.get().1)}
+                            {move || {
+                                let n = status_counts.get().1;
+                                if period_filter.get().is_empty() {
+                                    format!("Non soldés ({n})")
+                                } else {
+                                    format!("Non payés ({n})")
+                                }
+                            }}
                         </button>
                         <button
                             type="button"
@@ -664,6 +783,39 @@ pub fn CotisationsPage() -> impl IntoView {
                             }
                         >
                             {move || format!("Avec surplus ({})", status_counts.get().3)}
+                        </button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">"Paiement"</span>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            class=move || cotisation_chip_class(pay_method_filter.get() == "bank_transfer")
+                            on:click=move |_| {
+                                if pay_method_filter.get_untracked() == "bank_transfer" {
+                                    pay_method_filter.set(String::new());
+                                } else {
+                                    pay_method_filter.set("bank_transfer".into());
+                                }
+                                reset_lazy_window();
+                            }
+                        >
+                            "Banque"
+                        </button>
+                        <button
+                            type="button"
+                            class=move || cotisation_chip_class(pay_method_filter.get() == "cash")
+                            on:click=move |_| {
+                                if pay_method_filter.get_untracked() == "cash" {
+                                    pay_method_filter.set(String::new());
+                                } else {
+                                    pay_method_filter.set("cash".into());
+                                }
+                                reset_lazy_window();
+                            }
+                        >
+                            "Espèces"
                         </button>
                     </div>
                 </div>
@@ -780,7 +932,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                 reset_lazy_window();
                             })
                         />
-                        <Select
+                        <MultiSelect
                             label="Période"
                             options=period_filter_options
                             value=period_filter.into()
@@ -788,6 +940,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                 period_filter.set(v);
                                 reset_lazy_window();
                             })
+                            empty_label="Toute l'année"
                         />
                         <RowDensitySlider value=row_density />
                         <Select
@@ -860,7 +1013,18 @@ pub fn CotisationsPage() -> impl IntoView {
 
             <div class="grid shrink-0 gap-3 sm:grid-cols-3">
                 <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                    <p class="text-xs font-medium text-[var(--muted)]">"Payé / Dû (année)"</p>
+                    <p class="text-xs font-medium text-[var(--muted)]">
+                        {move || {
+                            let n = period_filter.get().len();
+                            if n == 0 {
+                                "Payé / Dû (année)".to_string()
+                            } else if n == 1 {
+                                "Payé / Dû (mois)".to_string()
+                            } else {
+                                format!("Payé / Dû ({n} mois)")
+                            }
+                        }}
+                    </p>
                     <p class="mt-1 font-display text-lg font-bold text-[var(--brand)]">
                         {move || {
                             let (recv, exp, _, _) = filtered_money_stats.get();
@@ -870,7 +1034,13 @@ pub fn CotisationsPage() -> impl IntoView {
                 </div>
                 <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                     <p class="text-xs font-medium text-[var(--muted)]">
-                        "Dette restante(inclut années précédentes)"
+                        {move || {
+                            if period_filter.get().is_empty() {
+                                "Dette restante(inclut années précédentes)".to_string()
+                            } else {
+                                "Dette à date (inclut années précédentes)".to_string()
+                            }
+                        }}
                     </p>
                     <p class="mt-1 font-display text-lg font-bold text-[var(--brand-red)]">
                         {move || {
@@ -1115,11 +1285,13 @@ pub fn CotisationsPage() -> impl IntoView {
             <Show when=move || view_mode.get() == "table">
             {move || {
                 let g = grid.get();
+                let months = parse_selected_months(&period_filter.get());
                 g.map(|g| {
                 let period_labels: Vec<(usize, String, Option<String>)> = g
                     .periods
                     .iter()
                     .enumerate()
+                    .filter(|(_, p)| months.is_empty() || months.contains(&p.period_month))
                     .map(|(i, p)| (i, p.label.clone(), p.label_color.clone()))
                     .collect();
                 let monthly_amt = g.year.monthly_amount;
@@ -1127,6 +1299,7 @@ pub fn CotisationsPage() -> impl IntoView {
                 let asc = sort_asc.get();
                 let density = row_density;
                 let intuit = intuitive.get();
+                let months_body = months.clone();
                 view! {
                     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <Table
@@ -1181,6 +1354,12 @@ pub fn CotisationsPage() -> impl IntoView {
                                 on_click=Callback::new(move |_| toggle_sort(SortKey::Carte))
                             >
                                 {format!("N°CARTE{}", sort_arrow(sk == SortKey::Carte, asc))}
+                            </Th>
+                            <Th
+                                class="cursor-pointer"
+                                on_click=Callback::new(move |_| toggle_sort(SortKey::Payment))
+                            >
+                                {format!("MODE PAIEMENT{}", sort_arrow(sk == SortKey::Payment, asc))}
                             </Th>
                             <Th
                                 class="cursor-pointer"
@@ -1252,12 +1431,22 @@ pub fn CotisationsPage() -> impl IntoView {
                                     let period_cells: Vec<(String, f64, Option<f64>)> = row
                                         .periods
                                         .iter()
+                                        .filter(|c| {
+                                            months_body.is_empty()
+                                                || months_body.contains(&c.period_month)
+                                        })
                                         .map(|c| {
                                             (c.period_id.clone(), c.amount_due, c.amount_paid)
                                         })
                                         .collect();
-                                    let bal = format_stored_money(row.balance, intuit);
-                                    let bal_cls = debt_text_class(row.balance);
+                                    let bal = format_stored_money(
+                                        balance_as_of(&row, months_as_of(&months_body)),
+                                        intuit,
+                                    );
+                                    let bal_cls = debt_text_class(balance_as_of(
+                                        &row,
+                                        months_as_of(&months_body),
+                                    ));
                                     let prior_stored = row.prior_december_debt;
                                     let prior_base = format_stored_money(prior_stored, intuit);
                                     let prior_cls = debt_text_class(prior_stored);
@@ -1285,6 +1474,27 @@ pub fn CotisationsPage() -> impl IntoView {
                                             <Td>{row.member.last_name.clone()}</Td>
                                             <Td>{row.member.first_name.clone()}</Td>
                                             <Td>{row.member.card_number.clone()}</Td>
+                                            <Td>
+                                                {
+                                                    let pm = row.member.payment_method.clone();
+                                                    let is_bank = matches!(
+                                                        pm.as_str(),
+                                                        "bank_transfer" | "bank" | "virement"
+                                                    );
+                                                    let label = payment_method_label(&pm);
+                                                    view! {
+                                                        <span
+                                                            class=if is_bank {
+                                                                "inline-block rounded-lg bg-[color-mix(in_srgb,var(--brand)_28%,transparent)] px-2 py-1 text-xs font-bold text-[var(--brand)]"
+                                                            } else {
+                                                                "inline-block px-2 py-1 text-xs font-medium text-[var(--muted)]"
+                                                            }
+                                                        >
+                                                            {label}
+                                                        </span>
+                                                    }
+                                                }
+                                            </Td>
                                             <Td class=prior_cls>
                                                 <EditableCell
                                                     value=Signal::derive(move || {
