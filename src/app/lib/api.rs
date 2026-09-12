@@ -124,6 +124,7 @@ struct ImportExcelGridArg<'a> {
     sheet_label: Option<&'a str>,
     role_values: Option<&'a [String]>,
     prune_missing: Option<bool>,
+    monthly_amount: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -150,6 +151,7 @@ struct BackupPathArg<'a> {
 struct OverviewStatsArg<'a> {
     year: i32,
     member_id: Option<&'a str>,
+    status_filter: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -488,10 +490,33 @@ pub async fn update_settings(settings: &AppSettings) -> Result<AppSettings, Stri
 pub async fn get_overview_stats(
     year: i32,
     member_id: Option<&str>,
+    status_filter: Option<&str>,
 ) -> Result<OverviewStats, String> {
     invoke(
         "get_overview_stats",
-        OverviewStatsArg { year, member_id },
+        OverviewStatsArg {
+            year,
+            member_id,
+            status_filter,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OverviewMembersArg<'a> {
+    year: i32,
+    category: &'a str,
+}
+
+pub async fn list_overview_members(
+    year: i32,
+    category: &str,
+) -> Result<Vec<OverviewMemberRow>, String> {
+    invoke(
+        "list_overview_members",
+        OverviewMembersArg { year, category },
     )
     .await
 }
@@ -534,6 +559,7 @@ pub async fn import_excel_grid(
     sheet_label: Option<&str>,
     role_values: Option<&[String]>,
     prune_missing: bool,
+    monthly_amount: Option<f64>,
 ) -> Result<ImportResult, String> {
     invoke(
         "import_excel_grid",
@@ -544,6 +570,7 @@ pub async fn import_excel_grid(
             sheet_label,
             role_values,
             prune_missing: Some(prune_missing),
+            monthly_amount,
         },
     )
     .await

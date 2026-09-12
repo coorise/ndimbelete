@@ -41,6 +41,7 @@ pub fn import_excel_grid(
     sheet_label: Option<String>,
     role_values: Option<Vec<String>>,
     prune_missing: Option<bool>,
+    monthly_amount: Option<f64>,
 ) -> Result<ImportResult, String> {
     let conn = state.db.lock();
     let roles = role_values.unwrap_or_else(|| {
@@ -51,7 +52,16 @@ pub fn import_excel_grid(
     });
     let label = sheet_label.unwrap_or_default();
     let prune = prune_missing.unwrap_or(true);
-    excel_import::import_excel_grid(&conn, &headers, &rows, year, &label, &roles, prune)
+    excel_import::import_excel_grid(
+        &conn,
+        &headers,
+        &rows,
+        year,
+        &label,
+        &roles,
+        prune,
+        monthly_amount,
+    )
 }
 
 #[tauri::command]

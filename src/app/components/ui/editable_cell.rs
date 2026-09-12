@@ -80,8 +80,11 @@ pub fn EditableCell(
                     on:blur=move |_| commit()
                     on:keydown=move |ev| {
                         let key = ev.key();
-                        if key == "Enter" {
-                            ev.prevent_default();
+                        if key == "Enter" || key == "Tab" {
+                            // Tab: commit then allow default focus move to next cell.
+                            if key == "Enter" {
+                                ev.prevent_default();
+                            }
                             commit();
                         } else if key == "Escape" {
                             editing.set(false);

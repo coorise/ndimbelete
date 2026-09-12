@@ -20,7 +20,7 @@ fn surplus_line(surplus: Option<f64>) -> String {
 }
 
 fn receipt_figures(r: &PaymentReceipt) -> (f64, f64, f64, Option<f64>) {
-    receipt_year_figures(r.monthly_amount, r.prior_december_debt, r.total_paid_year)
+    receipt_year_figures(r.monthly_amount, r.prior_december_debt, r.total_paid_year, 6)
 }
 
 fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> ReceiptPrintPayload {

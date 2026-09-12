@@ -4,7 +4,9 @@ use leptos::task::spawn_local;
 use crate::app::components::ui::{
     Button, ButtonVariant, Input, Modal, SearchableSelect, Select, SelectOption,
 };
-use crate::app::lib::{api, build_payment_receipt, Member, MemberDebtSummary, PaymentReceipt};
+use crate::app::lib::{
+    api, build_payment_receipt, today_payment_date, Member, MemberDebtSummary, PaymentReceipt,
+};
 
 fn money(v: f64) -> String {
     format!("{v:.2} €")
@@ -277,6 +279,7 @@ pub fn PaymentModal(
                                             String::new(),
                                             monthly,
                                             prior,
+                                            Some(today_payment_date()),
                                         );
                                         open.set(false);
                                         member_id.set(String::new());

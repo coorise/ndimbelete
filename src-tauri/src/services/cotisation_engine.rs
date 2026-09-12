@@ -1,12 +1,14 @@
 //! Cotisation calculation engine.
 //!
 //! Business rules:
-//! - Each bi-monthly period base due = `monthly_amount * 2`
-//! - `amount_due` is stored Excel-style as running debt before that period's payment
-//! - Balance = prior_debt + n*base − sum(paid) − ristourne
-//! - A period is unpaid when `amount_paid` is None or ≈0 (not paid < cumulative due)
-//! - After unpaid spanning ≥ 6 months → status `demissionnaire`
-//!   (3 consecutive unpaid bi-monthly periods, OR cumulative unpaid months ≥ 6)
+//! - `monthly_amount` is the default due **per planning period** (usually 20 €)
+//! - Each planning period (Jan, Mar, Mai…) adds that amount once — not ×2
+//! - `amount_due` is Excel-style running debt before that period's payment
+//! - Admins may override any debt cell; later periods recalculate forward
+//! - Year-end DETTE = last_due − last_paid (respects custom debt cells)
+//! - A period is unpaid when `amount_paid` is None or ≈0
+//! - After unpaid spanning ≥ 6 calendar months → status `demissionnaire`
+//!   (bi-monthly periods count as 2 months each for that rule)
 
 use chrono::Datelike;
 use rusqlite::{params, Connection};
@@ -14,9 +16,9 @@ use uuid::Uuid;
 
 use crate::models::{ContributionPeriod, MemberDebtSummary, MemberStatus, PeriodCell};
 
-/// Bi-monthly period base due amount.
+/// Default due for one planning period (= configured cotisation mensuelle / période).
 pub fn period_due_base(monthly_amount: f64) -> f64 {
-    monthly_amount * 2.0
+    monthly_amount
 }
 
 /// Compute running balance for a member in a year.
@@ -192,10 +194,14 @@ pub fn load_periods(conn: &Connection, year_id: &str) -> Result<Vec<Contribution
 /// ```text
 /// running = prior - ristourne
 /// for each period:
-///   running += base
+///   running += base   // base = monthly_amount (default per planning period)
 ///   amount_due = running
 ///   running -= paid.unwrap_or(0)
 /// ```
+///
+/// Use this after prior debt / monthly amount changes. Prefer
+/// [`propagate_running_dues_from`] after a manual debt or payment edit so custom
+/// debt cells are preserved.
 pub fn rebuild_running_dues(
     conn: &Connection,
     member_id: &str,
@@ -216,6 +222,64 @@ pub fn rebuild_running_dues(
     let mut running = prior - ristourne;
 
     for p in &periods {
+        let paid: Option<f64> = conn
+            .query_row(
+                "SELECT amount_paid FROM member_period_entries
+                 WHERE member_id = ?1 AND period_id = ?2",
+                params![member_id, p.id],
+                |r| r.get(0),
+            )
+            .unwrap_or(None);
+
+        running += base;
+        conn.execute(
+            "UPDATE member_period_entries SET amount_due = ?1
+             WHERE member_id = ?2 AND period_id = ?3",
+            params![running, member_id, p.id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        running -= paid.unwrap_or(0.0);
+    }
+
+    Ok(())
+}
+
+/// Excel-like forward fill: keep dues up to `from_period_id` (inclusive), then
+/// recompute later debt cells as `prev_due − prev_paid + base`.
+///
+/// `from_period_id = None` rebuilds the whole year from prior (same as
+/// [`rebuild_running_dues`]).
+pub fn propagate_running_dues_from(
+    conn: &Connection,
+    member_id: &str,
+    year_id: &str,
+    monthly_amount: f64,
+    from_period_id: Option<&str>,
+) -> Result<(), String> {
+    let Some(from_id) = from_period_id else {
+        return rebuild_running_dues(conn, member_id, year_id, monthly_amount);
+    };
+
+    let periods = load_periods(conn, year_id)?;
+    let base = period_due_base(monthly_amount);
+    let start = periods
+        .iter()
+        .position(|p| p.id == from_id)
+        .ok_or_else(|| "Période introuvable".to_string())?;
+
+    let (anchor_due, anchor_paid): (f64, Option<f64>) = conn
+        .query_row(
+            "SELECT amount_due, amount_paid FROM member_period_entries
+             WHERE member_id = ?1 AND period_id = ?2",
+            params![member_id, from_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0.0, None));
+
+    let mut running = anchor_due - anchor_paid.unwrap_or(0.0);
+
+    for p in periods.iter().skip(start + 1) {
         let paid: Option<f64> = conn
             .query_row(
                 "SELECT amount_paid FROM member_period_entries
@@ -284,9 +348,13 @@ pub fn recalculate_member_year(
         cells_raw.push((p.period_month, due, paid));
     }
 
-    // Year dues for balance = n × base (not sum of cumulative Excel due columns)
+    // Year dues for reporting = n × period base (standard planning obligation).
+    // Ending DETTE follows the Excel running columns (respects custom debt cells).
     let total_due = periods.len() as f64 * base;
-    let balance = compute_balance(prior, total_due, total_paid, ristourne);
+    let balance = cells_raw
+        .last()
+        .map(|(_, due, paid)| due - paid.unwrap_or(0.0))
+        .unwrap_or(prior - ristourne);
     let december_debt = balance.max(0.0);
 
     conn.execute(
@@ -351,7 +419,8 @@ pub fn recalculate_member_year(
     })
 }
 
-/// Recalculate every member for a year (rebuild running dues + status).
+/// Recalculate every member for a year (totals / status).
+/// Does **not** rewrite `amount_due` — Excel and manual debt cells stay intact.
 pub fn recalculate_all_members(conn: &Connection, year_id: &str) -> Result<usize, String> {
     let monthly: f64 = conn
         .query_row(
@@ -373,7 +442,6 @@ pub fn recalculate_all_members(conn: &Connection, year_id: &str) -> Result<usize
     let mut count = 0usize;
     for member_id in &ids {
         ensure_member_period_entries(conn, member_id, year_id, monthly)?;
-        rebuild_running_dues(conn, member_id, year_id, monthly)?;
         recalculate_member_year(conn, member_id, year_id)?;
         count += 1;
     }
@@ -411,7 +479,8 @@ pub fn clear_payment(
     )
     .map_err(|e| e.to_string())?;
 
-    rebuild_running_dues(conn, member_id, &year_id, monthly)?;
+    // Keep this period's debt cell; recalculate later months like Excel.
+    propagate_running_dues_from(conn, member_id, &year_id, monthly, Some(period_id))?;
     recalculate_member_year(conn, member_id, &year_id)
 }
 
@@ -470,7 +539,8 @@ pub fn record_payment(
         }
     }
 
-    rebuild_running_dues(conn, member_id, &year_id, monthly)?;
+    // Keep this period's debt cell; recalculate later months like Excel.
+    propagate_running_dues_from(conn, member_id, &year_id, monthly, Some(period_id))?;
     recalculate_member_year(conn, member_id, &year_id)
 }
 
@@ -506,13 +576,16 @@ pub fn set_period_cell(
             _ => clear_payment(conn, member_id, period_id),
         },
         "due" => {
-            let due = value.unwrap_or(0.0).max(0.0);
+            // Custom running debt for this planning period (Excel debt column).
+            let due = value.unwrap_or(0.0);
             conn.execute(
                 "UPDATE member_period_entries SET amount_due = ?1
                  WHERE member_id = ?2 AND period_id = ?3",
                 params![due, member_id, period_id],
             )
             .map_err(|e| e.to_string())?;
+            // Later periods: next_due = this_due − paid + period base (cotisation période).
+            propagate_running_dues_from(conn, member_id, &year_id, monthly, Some(period_id))?;
             recalculate_member_year(conn, member_id, &year_id)
         }
         other => Err(format!("Champ inconnu: {other}")),
@@ -564,6 +637,19 @@ pub fn update_year_monthly_amount(
     )
     .map_err(|e| e.to_string())?;
 
-    recalculate_all_members(conn, year_id)?;
+    // Changing the period rate rebuilds formula dues from prior + base − paid.
+    let mut stmt = conn
+        .prepare("SELECT id FROM members")
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    for member_id in &ids {
+        ensure_member_period_entries(conn, member_id, year_id, new_monthly)?;
+        rebuild_running_dues(conn, member_id, year_id, new_monthly)?;
+        recalculate_member_year(conn, member_id, year_id)?;
+    }
     Ok(())
 }

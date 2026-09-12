@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::app::lib::cn;
 
@@ -22,6 +23,14 @@ impl TableLoadMode {
     }
 }
 
+/// Default load mode for management tables.
+pub const DEFAULT_TABLE_LOAD_MODE: &str = "lazy";
+
+/// Initial window size when entering lazy / scroll mode.
+pub fn default_lazy_count(page_size: usize) -> usize {
+    page_size.max(25)
+}
+
 /// Slice rows according to load mode / page / lazy window.
 pub fn paginate_slice<T: Clone>(
     rows: &[T],
@@ -41,6 +50,100 @@ pub fn paginate_slice<T: Clone>(
             rows.iter().skip(start).take(size).cloned().collect()
         }
         TableLoadMode::Lazy => rows.iter().take(lazy_count.max(1)).cloned().collect(),
+    }
+}
+
+/// Grow the lazy window when a scrollable element is near the bottom.
+pub fn try_load_more_on_scroll(
+    el: &web_sys::Element,
+    mode: &str,
+    lazy_count: RwSignal<usize>,
+    total: usize,
+    step: usize,
+) {
+    if mode != "lazy" || total == 0 {
+        return;
+    }
+    let shown = lazy_count.get_untracked();
+    if shown >= total {
+        return;
+    }
+    let scroll_top = el.scroll_top() as f64;
+    let client_h = el.client_height() as f64;
+    let scroll_h = el.scroll_height() as f64;
+    if client_h <= 0.0 {
+        return;
+    }
+    let remaining = scroll_h - scroll_top - client_h;
+    if remaining <= 160.0 {
+        let step = step.max(25);
+        lazy_count.update(|n| *n = (*n + step).min(total));
+    }
+}
+
+/// Wire vertical near-bottom loading on a scroll container (table body or grid).
+#[component]
+pub fn LazyScrollRegion(
+    mode: RwSignal<String>,
+    lazy_count: RwSignal<usize>,
+    total: Signal<usize>,
+    page_size: RwSignal<usize>,
+    #[prop(optional)] class: &'static str,
+    children: Children,
+) -> impl IntoView {
+    let node_ref = NodeRef::<leptos::html::Div>::new();
+
+    // Auto-fill short viewports when lazy window / mode changes.
+    Effect::new(move |_| {
+        let _ = mode.get();
+        let _ = lazy_count.get();
+        let _ = total.get();
+        let Some(el) = node_ref.get() else {
+            return;
+        };
+        if mode.get_untracked() != "lazy" {
+            return;
+        }
+        if let Some(win) = web_sys::window() {
+            let el2 = el.clone();
+            let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                try_load_more_on_scroll(
+                    el2.as_ref(),
+                    &mode.get_untracked(),
+                    lazy_count,
+                    total.get_untracked(),
+                    page_size.get_untracked(),
+                );
+            });
+            let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                80,
+            );
+            cb.forget();
+        }
+    });
+
+    view! {
+        <div
+            node_ref=node_ref
+            class=cn(&[class, "min-h-0"])
+            on:scroll=move |ev| {
+                if let Some(el) = ev
+                    .current_target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                {
+                    try_load_more_on_scroll(
+                        &el,
+                        &mode.get_untracked(),
+                        lazy_count,
+                        total.get_untracked(),
+                        page_size.get_untracked(),
+                    );
+                }
+            }
+        >
+            {children()}
+        </div>
     }
 }
 
@@ -92,13 +195,13 @@ pub fn TablePaginationBar(
                         mode.set(v.clone());
                         page.set(0);
                         if v == "lazy" {
-                            lazy_count.set(page_size.get_untracked().max(25));
+                            lazy_count.set(default_lazy_count(page_size.get_untracked()));
                         }
                     }
                 >
+                    <option value="lazy" selected=move || mode.get() == "lazy">"Au défilement"</option>
                     <option value="page" selected=move || mode.get() == "page">"Pagination"</option>
                     <option value="all" selected=move || mode.get() == "all">"Tout charger"</option>
-                    <option value="lazy" selected=move || mode.get() == "lazy">"Au défilement"</option>
                 </select>
             </label>
 
@@ -156,10 +259,11 @@ pub fn TablePaginationBar(
                     <button
                         type="button"
                         class="h-8 rounded-lg border border-[var(--border)] px-3 text-xs font-semibold disabled:opacity-35"
-                        prop:disabled=move || lazy_count.get() >= total.get()
+                        disabled=Signal::derive(move || lazy_count.get() >= total.get())
                         on:click=move |_| {
-                            let step = page_size.get_untracked().max(25);
-                            lazy_count.update(|n| *n = (*n + step).min(total.get_untracked()));
+                            let step = default_lazy_count(page_size.get_untracked());
+                            let max = total.get_untracked();
+                            lazy_count.update(|n| *n = (*n + step).min(max));
                         }
                     >
                         "Charger plus"

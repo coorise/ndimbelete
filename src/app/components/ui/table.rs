@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use super::pagination::try_load_more_on_scroll;
 use super::table_fullscreen_toggle::TableFullscreenToggle;
 use crate::app::hooks::TableFullscreenCtx;
 use crate::app::lib::cn;
@@ -12,6 +13,11 @@ pub fn Table(
     #[prop(optional)] density: Option<RwSignal<f64>>,
     /// Show expand control on the top-right of the table chrome (above the h-scroll rail).
     #[prop(optional)] fullscreen_toggle: bool,
+    /// When set with lazy_* signals, loads more rows near the bottom of the body scroll.
+    #[prop(optional)] lazy_mode: Option<RwSignal<String>>,
+    #[prop(optional)] lazy_count: Option<RwSignal<usize>>,
+    #[prop(optional)] lazy_total: Option<Signal<usize>>,
+    #[prop(optional)] lazy_page_size: Option<RwSignal<usize>>,
     children: Children,
 ) -> impl IntoView {
     // Dual scrollbars: top rail mirrors the body so users don't hunt for bottom scroll.
@@ -67,6 +73,18 @@ pub fn Table(
                 syncing.set(true);
                 top.set_scroll_left(body.scroll_left());
                 syncing.set(false);
+
+                if let (Some(mode), Some(count), Some(total), Some(step)) =
+                    (lazy_mode, lazy_count, lazy_total, lazy_page_size)
+                {
+                    try_load_more_on_scroll(
+                        body.as_ref(),
+                        &mode.get_untracked(),
+                        count,
+                        total.get_untracked(),
+                        step.get_untracked(),
+                    );
+                }
             }
         });
         let _ = top.add_event_listener_with_callback("scroll", on_top.as_ref().unchecked_ref());
@@ -84,6 +102,48 @@ pub fn Table(
 
         on_top.forget();
         on_body.forget();
+    });
+
+    // Keep loading until the body fills the viewport (or all rows are shown).
+    Effect::new(move |_| {
+        let Some(mode) = lazy_mode else {
+            return;
+        };
+        let Some(count) = lazy_count else {
+            return;
+        };
+        let Some(total) = lazy_total else {
+            return;
+        };
+        let Some(step) = lazy_page_size else {
+            return;
+        };
+        let _ = mode.get();
+        let _ = count.get();
+        let _ = total.get();
+        let Some(body) = body_ref.get() else {
+            return;
+        };
+        if mode.get_untracked() != "lazy" {
+            return;
+        }
+        if let Some(win) = web_sys::window() {
+            let body_fill = body.clone();
+            let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                try_load_more_on_scroll(
+                    body_fill.as_ref(),
+                    &mode.get_untracked(),
+                    count,
+                    total.get_untracked(),
+                    step.get_untracked(),
+                );
+            });
+            let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                100,
+            );
+            cb.forget();
+        }
     });
 
     view! {

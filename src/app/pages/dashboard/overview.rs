@@ -17,6 +17,14 @@ fn money2(v: f64) -> String {
     format!("{v:.2} €")
 }
 
+fn cohort_chip_class(active: bool) -> &'static str {
+    if active {
+        "tap-target rounded-xl bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
+    } else {
+        "tap-target rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2.5 text-sm font-semibold text-[var(--fg)] hover:bg-[color-mix(in_srgb,var(--brand-yellow)_28%,var(--bg-elevated))]"
+    }
+}
+
 #[derive(Clone)]
 struct ChartTooltipState {
     title: String,
@@ -48,20 +56,24 @@ pub fn OverviewPage() -> impl IntoView {
     let tooltip = RwSignal::new(Option::<ChartTooltipState>::None);
     let debt_sign = RwSignal::new("intuitive".to_string());
     let intuitive = Signal::derive(move || is_intuitive_sign(&debt_sign.get()));
+    // Cohort filter: "", "paid", "unfulfilled", "debt", "surplus"
+    let status_filter = RwSignal::new(String::new());
 
     let reload = move || {
         let y = year.get_untracked();
         let mid = member_id.get_untracked();
         let mid_opt = if mid.is_empty() { None } else { Some(mid) };
+        let sf = status_filter.get_untracked();
+        let sf_opt = if sf.is_empty() { None } else { Some(sf) };
         loading.set(true);
         spawn_local(async move {
             let _ = api::ensure_year(y).await;
-            // Heal statuses when Excel had empty paid columns.
+            // Heal demissionnaire flags only — do not wipe Excel debt cells.
             let _ = api::recalculate_all_members(y).await;
             if let Ok(s) = api::get_settings().await {
                 debt_sign.set(s.debt_display_sign);
             }
-            match api::get_overview_stats(y, mid_opt.as_deref()).await {
+            match api::get_overview_stats(y, mid_opt.as_deref(), sf_opt.as_deref()).await {
                 Ok(s) => {
                     stats.set(Some(s));
                     error.set(None);
@@ -78,6 +90,7 @@ pub fn OverviewPage() -> impl IntoView {
     Effect::new(move |_| {
         let _ = year.get();
         let _ = member_id.get();
+        let _ = status_filter.get();
         selected_period.set(None);
         selected_pie.set(None);
         tooltip.set(None);
@@ -132,10 +145,79 @@ pub fn OverviewPage() -> impl IntoView {
                         options=member_options
                         value=member_id.into()
                         on_change=Callback::new(move |v| member_id.set(v))
-                        class="min-w-[16rem] w-72 max-w-full"
+                        class="min-w-[14rem] w-64 max-w-full"
                         placeholder="Tous les membres"
                         search_placeholder="Nom ou n° carte…"
                     />
+                    <div class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">"Statut cotisation"</span>
+                        <div class="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                class=move || cohort_chip_class(status_filter.get() == "paid")
+                                on:click=move |_| {
+                                    if status_filter.get_untracked() == "paid" {
+                                        status_filter.set(String::new());
+                                    } else {
+                                        status_filter.set("paid".into());
+                                    }
+                                }
+                            >
+                                {move || {
+                                    let n = stats.get().map(|s| s.paid_year_count).unwrap_or(0);
+                                    format!("Soldés ({n})")
+                                }}
+                            </button>
+                            <button
+                                type="button"
+                                class=move || cohort_chip_class(status_filter.get() == "unfulfilled")
+                                on:click=move |_| {
+                                    if status_filter.get_untracked() == "unfulfilled" {
+                                        status_filter.set(String::new());
+                                    } else {
+                                        status_filter.set("unfulfilled".into());
+                                    }
+                                }
+                            >
+                                {move || {
+                                    let n = stats.get().map(|s| s.unfulfilled_count).unwrap_or(0);
+                                    format!("Non soldés ({n})")
+                                }}
+                            </button>
+                            <button
+                                type="button"
+                                class=move || cohort_chip_class(status_filter.get() == "debt")
+                                on:click=move |_| {
+                                    if status_filter.get_untracked() == "debt" {
+                                        status_filter.set(String::new());
+                                    } else {
+                                        status_filter.set("debt".into());
+                                    }
+                                }
+                            >
+                                {move || {
+                                    let n = stats.get().map(|s| s.with_debt_count).unwrap_or(0);
+                                    format!("Avec dette ({n})")
+                                }}
+                            </button>
+                            <button
+                                type="button"
+                                class=move || cohort_chip_class(status_filter.get() == "surplus")
+                                on:click=move |_| {
+                                    if status_filter.get_untracked() == "surplus" {
+                                        status_filter.set(String::new());
+                                    } else {
+                                        status_filter.set("surplus".into());
+                                    }
+                                }
+                            >
+                                {move || {
+                                    let n = stats.get().map(|s| s.with_surplus_count).unwrap_or(0);
+                                    format!("Avec surplus ({n})")
+                                }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -156,7 +238,9 @@ pub fn OverviewPage() -> impl IntoView {
                     let pie = s.payment_status_pie.clone();
                     let debt_curve = s.debt_vs_paid.clone();
                     let no_payments = s.total_paid < 0.001;
-                    let unpaid_label = format_stored_money(s.total_unpaid, intuit);
+                    // total_debt is always ≥ 0 (Excel debt magnitude). Intuitive flips display sign.
+                    let debt_label = format_stored_money(s.total_debt, intuit);
+                    let surplus_label = format!("{:.2}", s.total_surplus);
                     let status_pie = vec![
                         PaymentStatusSlice {
                             label: "Actifs".into(),
@@ -180,20 +264,39 @@ pub fn OverviewPage() -> impl IntoView {
                                 </p>
                             </Show>
 
-                            <Card title="Payé vs Dette (cumul)">
-                                <DebtVsPaidChart
-                                    points=debt_curve
-                                    on_select=Callback::new(move |(label, ev): (String, web_sys::MouseEvent)| {
-                                        selected_period.set(Some(label.clone()));
-                                        tooltip.set(Some(tip_from_mouse(
-                                            &ev,
-                                            label.clone(),
-                                            format!(
-                                                "Période {label}. Ouvrez Cotisations pour le détail membre."
-                                            ),
-                                        )));
-                                    })
-                                />
+                            <Card title="Payé vs Dette / Surplus (cumul)">
+                                {
+                                    let debt_curve_tip = debt_curve.clone();
+                                    view! {
+                                        <DebtVsPaidChart
+                                            points=debt_curve
+                                            intuitive=false
+                                            on_select=Callback::new(move |(label, ev): (String, web_sys::MouseEvent)| {
+                                                selected_period.set(Some(label.clone()));
+                                                let body = debt_curve_tip
+                                                    .iter()
+                                                    .find(|p| p.label == label)
+                                                    .map(|p| {
+                                                        let bal = p.debt_cumulative;
+                                                        let kind = if bal > 0.001 {
+                                                            "Dette"
+                                                        } else if bal < -0.001 {
+                                                            "Surplus"
+                                                        } else {
+                                                            "Solde nul"
+                                                        };
+                                                        format!(
+                                                            "{kind} : {:.2} €\nPayé cumulé : {:.2} €",
+                                                            bal.abs(),
+                                                            p.paid_cumulative
+                                                        )
+                                                    })
+                                                    .unwrap_or_else(|| format!("Période {label}"));
+                                                tooltip.set(Some(tip_from_mouse(&ev, label, body)));
+                                            })
+                                        />
+                                    }
+                                }
                             </Card>
 
                             <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -202,7 +305,11 @@ pub fn OverviewPage() -> impl IntoView {
                                 <StatCard label="Démissionnaires".to_string() value=s.demissionnaire_count.to_string() />
                                 <StatCard label="Total payé".to_string() value=money(s.total_paid) />
                                 <StatCard label="Total dû (périodes)".to_string() value=money(s.total_due) />
-                                <StatCard label="Restant / solde".to_string() value=format!("{unpaid_label} €") />
+                                <StatCard
+                                    label="Dette restante(inclut années précédentes)".to_string()
+                                    value=format!("{debt_label} €")
+                                />
+                                <StatCard label="Surplus (membres en avance)".to_string() value=format!("{surplus_label} €") />
                             </div>
 
                             <div class="grid gap-4 lg:grid-cols-2">
@@ -279,7 +386,7 @@ pub fn OverviewPage() -> impl IntoView {
                                             "✕"
                                         </button>
                                     </div>
-                                    <p class="mt-1 text-[var(--fg)]">
+                                    <p class="mt-1 whitespace-pre-line text-[var(--fg)]">
                                         {move || tooltip.get().map(|t| t.body).unwrap_or_default()}
                                     </p>
                                 </div>
@@ -469,89 +576,198 @@ fn PieChart(
 #[component]
 fn DebtVsPaidChart(
     points: Vec<DebtVsPaidPoint>,
+    intuitive: bool,
     #[prop(into)] on_select: Callback<(String, web_sys::MouseEvent)>,
 ) -> impl IntoView {
-    let max = points
+    let raw_max = points
         .iter()
         .map(|p| p.debt_cumulative.max(p.paid_cumulative))
         .fold(0.0_f64, f64::max)
-        .max(1.0);
-    let w = 560.0_f64;
-    let h = 200.0_f64;
-    let n = (points.len().saturating_sub(1)).max(1) as f64;
-    let x0 = 48.0_f64;
-    let plot_w = w - x0 - 14.0;
+        .max(0.0);
+    let raw_min = points
+        .iter()
+        .map(|p| p.debt_cumulative.min(p.paid_cumulative))
+        .fold(0.0_f64, f64::min)
+        .min(0.0);
+    let pad = ((raw_max - raw_min).abs() * 0.05).max(1.0);
+    let y_max = if raw_max.abs() < 0.001 && raw_min.abs() < 0.001 {
+        1.0
+    } else {
+        raw_max + pad
+    };
+    let y_min = if raw_min < -0.001 {
+        raw_min - pad
+    } else if raw_max > 0.001 {
+        0.0_f64.min(raw_min)
+    } else {
+        0.0
+    };
+    let y_min = if y_min > -0.001 && raw_min >= -0.001 {
+        0.0
+    } else {
+        y_min
+    };
+    let span = (y_max - y_min).max(1.0);
 
-    let debt_poly = points
+    let w = 560.0_f64;
+    let h = 220.0_f64;
+    let n = (points.len().saturating_sub(1)).max(1) as f64;
+    let x0 = 52.0_f64;
+    let plot_top = 16.0_f64;
+    let plot_bottom = h - 32.0;
+    let plot_h = plot_bottom - plot_top;
+    let plot_w = w - x0 - 14.0;
+    let y_at = |v: f64| plot_bottom - ((v - y_min) / span) * plot_h;
+    let zero_y = y_at(0.0);
+    let show_zero = y_min < -0.001 && y_max > 0.001;
+
+    // Intuitive: debt below 0 (red), surplus above 0 (blue).
+    // Excel: debt above 0 (red), surplus below 0 (blue).
+    let is_debt_display = |v: f64| -> bool {
+        if intuitive {
+            v < -0.001
+        } else {
+            v > 0.001
+        }
+    };
+
+    let coords: Vec<(f64, f64)> = points
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let x = (i as f64 / n) * plot_w + x0;
-            let y = h - 28.0 - (p.debt_cumulative / max) * (h - 48.0);
-            format!("{x:.1},{y:.1}")
+            (x, p.debt_cumulative)
         })
-        .collect::<Vec<_>>()
-        .join(" ");
+        .collect();
+
+    let mut debt_segments: Vec<String> = Vec::new();
+    let mut surplus_segments: Vec<String> = Vec::new();
+    let mut cur_debt: Vec<String> = Vec::new();
+    let mut cur_surplus: Vec<String> = Vec::new();
+
+    let flush = |buf: &mut Vec<String>, out: &mut Vec<String>| {
+        if buf.len() >= 2 {
+            out.push(buf.join(" "));
+        }
+        buf.clear();
+    };
+
+    for i in 0..coords.len() {
+        let (x, v) = coords[i];
+        let pt = format!("{x:.1},{:.1}", y_at(v));
+        if is_debt_display(v) {
+            if !cur_surplus.is_empty() {
+                flush(&mut cur_surplus, &mut surplus_segments);
+            }
+            // Crossing from surplus → debt: insert zero point
+            if i > 0 {
+                let (x0p, v0) = coords[i - 1];
+                if !is_debt_display(v0) && v0.abs() > 0.001 && v.abs() > 0.001 {
+                    let t = v0 / (v0 - v);
+                    let xz = x0p + t * (x - x0p);
+                    let zpt = format!("{xz:.1},{zero_y:.1}");
+                    cur_surplus.push(zpt.clone());
+                    flush(&mut cur_surplus, &mut surplus_segments);
+                    cur_debt.push(zpt);
+                }
+            }
+            cur_debt.push(pt);
+        } else if v.abs() <= 0.001 {
+            // On zero: close both
+            cur_debt.push(pt.clone());
+            cur_surplus.push(pt);
+            flush(&mut cur_debt, &mut debt_segments);
+            flush(&mut cur_surplus, &mut surplus_segments);
+        } else {
+            if !cur_debt.is_empty() {
+                flush(&mut cur_debt, &mut debt_segments);
+            }
+            if i > 0 {
+                let (x0p, v0) = coords[i - 1];
+                if is_debt_display(v0) && v0.abs() > 0.001 {
+                    let t = v0 / (v0 - v);
+                    let xz = x0p + t * (x - x0p);
+                    let zpt = format!("{xz:.1},{zero_y:.1}");
+                    cur_debt.push(zpt.clone());
+                    flush(&mut cur_debt, &mut debt_segments);
+                    cur_surplus.push(zpt);
+                }
+            }
+            cur_surplus.push(pt);
+        }
+    }
+    flush(&mut cur_debt, &mut debt_segments);
+    flush(&mut cur_surplus, &mut surplus_segments);
 
     let paid_poly = points
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let x = (i as f64 / n) * plot_w + x0;
-            let y = h - 28.0 - (p.paid_cumulative / max) * (h - 48.0);
-            format!("{x:.1},{y:.1}")
+            format!("{x:.1},{:.1}", y_at(p.paid_cumulative))
         })
         .collect::<Vec<_>>()
         .join(" ");
 
-    let debt_area = format!(
-        "{} {} {}",
-        format!("{:.1},{:.1}", x0, h - 28.0),
-        debt_poly,
-        format!(
-            "{:.1},{:.1}",
-            (points.len().saturating_sub(1) as f64 / n) * plot_w + x0,
-            h - 28.0
-        )
-    );
-
-    let y_ticks: Vec<(f64, String)> = (0..4)
+    let y_ticks: Vec<(f64, String)> = (0..5)
         .map(|i| {
-            let t = i as f64 / 3.0;
-            let y = 16.0 + t * (h - 44.0);
-            let val = max * (1.0 - t);
-            (y, format!("{:.0}", val))
+            let t = i as f64 / 4.0;
+            let val = y_max - t * span;
+            (y_at(val), format!("{:.0}", val))
         })
         .collect();
 
     view! {
-        <svg viewBox=format!("0 0 {w} {h}") class="h-56 w-full" role="img" aria-label="Dette vs Payé">
+        <svg viewBox=format!("0 0 {w} {h}") class="h-60 w-full" role="img" aria-label="Dette vs Payé">
             {y_ticks.into_iter().map(|(y, label)| {
                 view! {
                     <g>
                         <line
-                            x1="42"
+                            x1="46"
                             x2=(w - 10.0).to_string()
                             y1=y.to_string()
                             y2=y.to_string()
                             stroke="color-mix(in srgb, var(--fg) 10%, transparent)"
                         ></line>
-                        <text x="4" y=(y + 4.0).to_string() font-size="10" fill="var(--muted)">{label}</text>
+                        <text x="2" y=(y + 4.0).to_string() font-size="10" fill="var(--muted)">{label}</text>
                     </g>
                 }
             }).collect_view()}
-            <polygon
-                points=debt_area
-                fill="color-mix(in srgb, var(--brand-red) 14%, transparent)"
-            ></polygon>
-            <polyline
-                fill="none"
-                stroke="var(--brand-red)"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                points=debt_poly
-            ></polyline>
+            <Show when=move || show_zero>
+                <line
+                    x1="46"
+                    x2=(w - 10.0).to_string()
+                    y1=zero_y.to_string()
+                    y2=zero_y.to_string()
+                    stroke="color-mix(in srgb, var(--fg) 35%, transparent)"
+                    stroke-width="1.5"
+                    stroke-dasharray="4 3"
+                ></line>
+            </Show>
+            {debt_segments.into_iter().map(|pts| {
+                view! {
+                    <polyline
+                        fill="none"
+                        stroke="var(--brand-red)"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        points=pts
+                    ></polyline>
+                }
+            }).collect_view()}
+            {surplus_segments.into_iter().map(|pts| {
+                view! {
+                    <polyline
+                        fill="none"
+                        stroke="#2563eb"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        points=pts
+                    ></polyline>
+                }
+            }).collect_view()}
             <polyline
                 fill="none"
                 stroke="var(--brand)"
@@ -562,31 +778,47 @@ fn DebtVsPaidChart(
             ></polyline>
             {points.iter().enumerate().map(|(i, p)| {
                 let x = (i as f64 / n) * plot_w + x0;
-                let y_d = h - 28.0 - (p.debt_cumulative / max) * (h - 48.0);
-                let y_p = h - 28.0 - (p.paid_cumulative / max) * (h - 48.0);
+                let y_d = y_at(p.debt_cumulative);
+                let y_p = y_at(p.paid_cumulative);
                 let label = p.label.clone();
+                let bal = p.debt_cumulative;
+                let kind = if is_debt_display(bal) {
+                    "Dette"
+                } else if bal.abs() <= 0.001 {
+                    "Solde nul"
+                } else {
+                    "Surplus"
+                };
                 let tip = format!(
-                    "{} — dette cumulée {:.0} € · payé cumulé {:.0} €",
-                    p.label, p.debt_cumulative, p.paid_cumulative
+                    "{label} — {kind} {:.2} € · Payé cumulé {:.2} €",
+                    bal.abs(),
+                    p.paid_cumulative
                 );
+                let fill = if is_debt_display(bal) {
+                    "var(--brand-red)"
+                } else if bal.abs() <= 0.001 {
+                    "var(--muted)"
+                } else {
+                    "#2563eb"
+                };
                 let lbl = label.clone();
-                let hit_y = y_d.min(y_p) - 12.0;
-                let hit_h = (y_d.max(y_p) - hit_y) + 24.0;
+                let hit_y = y_d.min(y_p) - 14.0;
+                let hit_h = (y_d.max(y_p) - hit_y) + 28.0;
                 view! {
                     <g class="cursor-pointer" on:click=move |ev| on_select.run((lbl.clone(), ev))>
                         <title>{tip}</title>
                         <rect
-                            x=(x - 14.0).to_string()
+                            x=(x - 16.0).to_string()
                             y=hit_y.to_string()
-                            width="28"
-                            height=hit_h.max(28.0).to_string()
+                            width="32"
+                            height=hit_h.max(32.0).to_string()
                             fill="transparent"
                         ></rect>
-                        <circle cx=x.to_string() cy=y_d.to_string() r="5.5" fill="var(--brand-red)" stroke="var(--bg-elevated)" stroke-width="2"></circle>
+                        <circle cx=x.to_string() cy=y_d.to_string() r="5.5" fill=fill stroke="var(--bg-elevated)" stroke-width="2"></circle>
                         <circle cx=x.to_string() cy=y_p.to_string() r="5.5" fill="var(--brand)" stroke="var(--bg-elevated)" stroke-width="2"></circle>
                         <text
                             x=x.to_string()
-                            y=(h - 8.0).to_string()
+                            y=(h - 10.0).to_string()
                             text-anchor="middle"
                             font-size="11"
                             fill="var(--muted)"
@@ -598,7 +830,7 @@ fn DebtVsPaidChart(
             }).collect_view()}
         </svg>
         <p class="mt-2 text-xs text-[var(--muted)]">
-            "Rouge = dette cumulée · Vert = payé cumulé · cliquez un point pour le détail"
+            "Rouge = dette (> 0) · Bleu = surplus (< 0) · Vert = payé cumulé · cliquez un point pour le détail"
         </p>
     }
 }

@@ -449,7 +449,7 @@ pub fn seed_year(conn: &Connection, year: i32) -> Result<String> {
 
     let year_id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO contribution_years (id, year, monthly_amount, sheet_label) VALUES (?1, ?2, 10, ?3)",
+        "INSERT INTO contribution_years (id, year, monthly_amount, sheet_label) VALUES (?1, ?2, 20, ?3)",
         rusqlite::params![year_id, year, year.to_string()],
     )?;
 
