@@ -229,3 +229,145 @@ pub fn SearchableSelect(
         </div>
     }
 }
+
+/// Multi-select dropdown (checkbox list). Empty `value` = no selection (caller treats as “all”).
+#[component]
+pub fn MultiSelect(
+    #[prop(optional)] label: &'static str,
+    options: Signal<Vec<SelectOption>>,
+    value: Signal<Vec<String>>,
+    #[prop(into)] on_change: Callback<Vec<String>>,
+    #[prop(optional)] class: &'static str,
+    #[prop(optional)] empty_label: &'static str,
+) -> impl IntoView {
+    let open = RwSignal::new(false);
+    let root_ref = NodeRef::<leptos::html::Div>::new();
+    let empty_label = if empty_label.is_empty() {
+        "Toute l'année"
+    } else {
+        empty_label
+    };
+
+    let summary = Signal::derive(move || {
+        let selected = value.get();
+        let opts = options.get();
+        if selected.is_empty() {
+            return empty_label.to_string();
+        }
+        let labels: Vec<String> = opts
+            .into_iter()
+            .filter(|o| selected.iter().any(|v| v == &o.value))
+            .map(|o| o.label)
+            .collect();
+        if labels.is_empty() {
+            empty_label.to_string()
+        } else if labels.len() <= 2 {
+            labels.join(", ")
+        } else {
+            format!("{} mois", labels.len())
+        }
+    });
+
+    Effect::new(move |_| {
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let handler = wasm_bindgen::closure::Closure::<dyn FnMut(_)>::new({
+            move |ev: web_sys::MouseEvent| {
+                if !open.get_untracked() {
+                    return;
+                }
+                let Some(root) = root_ref.get_untracked() else {
+                    return;
+                };
+                if let Some(target) = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok()) {
+                    if !root.contains(Some(&target)) {
+                        open.set(false);
+                    }
+                }
+            }
+        });
+        let _ = document
+            .add_event_listener_with_callback("mousedown", handler.as_ref().unchecked_ref());
+        handler.forget();
+    });
+
+    view! {
+        <div
+            node_ref=root_ref
+            class=cn(&[
+                "relative flex min-w-0 flex-col gap-1.5 text-sm font-medium",
+                if class.is_empty() { "w-auto" } else { class },
+            ])
+        >
+            {(!label.is_empty()).then(|| view! { <span>{label}</span> })}
+            <button
+                type="button"
+                class="tap-target flex w-full items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-base focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--brand)_35%,transparent)]"
+                aria-expanded=move || open.get()
+                on:click=move |_| open.update(|o| *o = !*o)
+            >
+                <span class=move || {
+                    if value.get().is_empty() {
+                        "truncate text-[var(--muted)]"
+                    } else {
+                        "truncate"
+                    }
+                }>
+                    {move || summary.get()}
+                </span>
+                <span class="shrink-0 text-[var(--muted)]">"▾"</span>
+            </button>
+
+            <Show when=move || open.get()>
+                <div class="absolute left-0 right-0 top-[calc(100%-0.15rem)] z-50 mt-1 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+                    <div class="border-b border-[var(--border)] px-2 py-1.5">
+                        <button
+                            type="button"
+                            class="w-full rounded-lg px-2 py-1.5 text-left text-sm font-semibold text-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_10%,transparent)]"
+                            on:click=move |_| {
+                                on_change.run(Vec::new());
+                            }
+                        >
+                            {empty_label}
+                        </button>
+                    </div>
+                    <ul class="max-h-56 overflow-y-auto py-1" role="listbox">
+                        <For
+                            each=move || options.get()
+                            key=|o| o.value.clone()
+                            children=move |o| {
+                                let val = o.value.clone();
+                                let val_chk = o.value.clone();
+                                let label_v = o.label.clone();
+                                view! {
+                                    <li>
+                                        <label class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color-mix(in_srgb,var(--fg)_6%,transparent)]">
+                                            <input
+                                                type="checkbox"
+                                                class="h-4 w-4 accent-[var(--brand)]"
+                                                prop:checked=move || {
+                                                    value.get().iter().any(|v| v == &val_chk)
+                                                }
+                                                on:change=move |_| {
+                                                    let mut next = value.get_untracked();
+                                                    if let Some(i) = next.iter().position(|v| v == &val) {
+                                                        next.remove(i);
+                                                    } else {
+                                                        next.push(val.clone());
+                                                    }
+                                                    on_change.run(next);
+                                                }
+                                            />
+                                            <span class="truncate">{label_v}</span>
+                                        </label>
+                                    </li>
+                                }
+                            }
+                        />
+                    </ul>
+                </div>
+            </Show>
+        </div>
+    }
+}

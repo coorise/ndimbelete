@@ -604,12 +604,25 @@ pub fn import_excel(
         let card = get_str(row, cols.carte);
         if card.is_empty() {
             let nom = get_str(row, cols.nom);
-            if nom.is_empty() {
+            let prenom = get_str(row, cols.prenom);
+            if nom.is_empty() && prenom.is_empty() {
                 continue;
             }
             failed.push(ImportFailure {
                 row: excel_row,
                 reason: "Missing N°CARTE".into(),
+                cells,
+            });
+            continue;
+        }
+
+        // Same card twice in one sheet → keep first, report the duplicate.
+        if !seen_cards.insert(card.clone()) {
+            failed.push(ImportFailure {
+                row: excel_row,
+                reason: format!(
+                    "N°CARTE en double (« {card} ») — déjà importé plus haut dans le fichier"
+                ),
                 cells,
             });
             continue;
@@ -628,13 +641,15 @@ pub fn import_excel(
         ) {
             Ok(()) => {
                 ok += 1;
-                seen_cards.insert(card);
             }
-            Err(reason) => failed.push(ImportFailure {
-                row: excel_row,
-                reason,
-                cells,
-            }),
+            Err(reason) => {
+                seen_cards.remove(&card);
+                failed.push(ImportFailure {
+                    row: excel_row,
+                    reason,
+                    cells,
+                });
+            }
         }
     }
 
@@ -764,6 +779,17 @@ pub fn import_excel_grid(
             continue;
         }
 
+        if !seen_cards.insert(card.clone()) {
+            failed.push(ImportFailure {
+                row: excel_row,
+                reason: format!(
+                    "N°CARTE en double (« {card} ») — déjà importé plus haut dans le fichier"
+                ),
+                cells: cells.clone(),
+            });
+            continue;
+        }
+
         match import_one_row(
             conn,
             &data,
@@ -777,13 +803,15 @@ pub fn import_excel_grid(
         ) {
             Ok(()) => {
                 ok += 1;
-                seen_cards.insert(card);
             }
-            Err(reason) => failed.push(ImportFailure {
-                row: excel_row,
-                reason,
-                cells: cells.clone(),
-            }),
+            Err(reason) => {
+                seen_cards.remove(&card);
+                failed.push(ImportFailure {
+                    row: excel_row,
+                    reason,
+                    cells: cells.clone(),
+                });
+            }
         }
     }
 

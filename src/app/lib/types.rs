@@ -493,6 +493,10 @@ pub struct OverviewStats {
     pub with_debt_count: i64,
     #[serde(default)]
     pub with_surplus_count: i64,
+    #[serde(default)]
+    pub period_months: Vec<i32>,
+    #[serde(default)]
+    pub period_month: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -152,6 +152,8 @@ struct OverviewStatsArg<'a> {
     year: i32,
     member_id: Option<&'a str>,
     status_filter: Option<&'a str>,
+    period_months: Option<&'a [i32]>,
+    period_month: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -491,6 +493,7 @@ pub async fn get_overview_stats(
     year: i32,
     member_id: Option<&str>,
     status_filter: Option<&str>,
+    period_months: Option<&[i32]>,
 ) -> Result<OverviewStats, String> {
     invoke(
         "get_overview_stats",
@@ -498,6 +501,8 @@ pub async fn get_overview_stats(
             year,
             member_id,
             status_filter,
+            period_months,
+            period_month: None,
         },
     )
     .await
