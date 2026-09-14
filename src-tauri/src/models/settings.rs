@@ -164,12 +164,12 @@ impl Default for AppSettings {
 
 /// Long readable default (plain / markdown markers).
 pub fn default_mini_template_plain() -> String {
-    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\nMode de paiement : {{PAYMENT_METHOD}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
 pub fn default_a4_template_plain() -> String {
-    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
+    "{{ORG.NAME}}\n{{ORG.ADDRESS}}\n\nReçu de cotisation — {{COTISATION.YEAR}}\n{{DATE}}\n------------------------------\nMembre : {{USER.NAME}}\nN° carte : {{USER.CARD}}\nDate de paiement : {{PAYMENT_DATE}}\n\nMontant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}\nMode de paiement : {{PAYMENT_METHOD}}\n**Montant Reçu : {{RECEIVED_AMOUNT}}**\nRestant à payer pour {{COTISATION.YEAR}} : {{REMAINING_DEBT}}\n{{SURPLUS_LINE}}\nNouveau Solde : {{NEW_BALANCE}}\n\nMerci pour votre solidarité\nNDIMBELENTÉ"
         .into()
 }
 
@@ -220,11 +220,48 @@ pub fn maybe_upgrade_short_template(current: &str, long_html: &str) -> String {
         || !compact.contains("{{year_total_due}}")
         || !compact.contains("{{payment_date}}")
         || !compact.contains("{{surplus_line}}");
-    if looks_short || looks_legacy_mid || missing_new_fields {
+    let upgraded = if looks_short || looks_legacy_mid || missing_new_fields {
         long_html.to_string()
     } else {
         current.to_string()
+    };
+    ensure_payment_method_in_template(&upgraded)
+}
+
+/// Insert `Mode de paiement : {{PAYMENT_METHOD}}` before the received-amount line when missing.
+pub fn ensure_payment_method_in_template(tpl: &str) -> String {
+    let compact: String = tpl
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase();
+    if compact.contains("{{payment_method}}") {
+        return tpl.to_string();
     }
+    let insert_html = "<div>Mode de paiement : {{PAYMENT_METHOD}}</div>";
+    let insert_plain = "Mode de paiement : {{PAYMENT_METHOD}}\n";
+    if tpl.contains("<div") {
+        if let Some(pos) = tpl.find("{{RECEIVED_AMOUNT}}") {
+            if let Some(div_start) = tpl[..pos].rfind("<div") {
+                return format!("{}{}{}", &tpl[..div_start], insert_html, &tpl[div_start..]);
+            }
+        }
+        if let Some(pos) = tpl.find("Montant Reçu") {
+            if let Some(div_start) = tpl[..pos].rfind("<div") {
+                return format!("{}{}{}", &tpl[..div_start], insert_html, &tpl[div_start..]);
+            }
+        }
+    }
+    if let Some(pos) = tpl.find("**Montant Reçu") {
+        return format!("{}{}{}", &tpl[..pos], insert_plain, &tpl[pos..]);
+    }
+    if let Some(pos) = tpl.find("Montant Reçu") {
+        return format!("{}{}{}", &tpl[..pos], insert_plain, &tpl[pos..]);
+    }
+    if let Some(pos) = tpl.find("{{RECEIVED_AMOUNT}}") {
+        return format!("{}{}{}", &tpl[..pos], insert_plain, &tpl[pos..]);
+    }
+    tpl.to_string()
 }
 
 /// True when saved field lines still use the old receipt vocabulary.
@@ -245,4 +282,43 @@ pub fn fields_need_receipt_upgrade(fields: &[ReceiptField]) -> bool {
         || !compact.contains("{{year_total_due}}")
         || !compact.contains("{{payment_date}}")
         || !compact.contains("{{surplus_line}}")
+}
+
+/// Insert payment-method field before received amount when missing.
+pub fn ensure_payment_method_in_fields(fields: &[ReceiptField]) -> Vec<ReceiptField> {
+    let has = fields
+        .iter()
+        .any(|f| f.content.to_lowercase().contains("{{payment_method}}"));
+    if has {
+        return fields.to_vec();
+    }
+    let mut out = fields.to_vec();
+    let insert_at = out
+        .iter()
+        .position(|f| {
+            let c = f.content.to_lowercase();
+            c.contains("{{received_amount}}") || c.contains("montant reçu") || c.contains("montant recu")
+        })
+        .unwrap_or(out.len());
+    let font_size = out
+        .get(insert_at)
+        .map(|f| f.font_size)
+        .unwrap_or(10.0);
+    out.insert(
+        insert_at,
+        ReceiptField {
+            id: Uuid::new_v4().to_string(),
+            content: "Mode de paiement : {{PAYMENT_METHOD}}".into(),
+            position: 0,
+            font_size,
+            bold: false,
+            italic: false,
+            align: default_align(),
+            color: default_color(),
+        },
+    );
+    for (i, f) in out.iter_mut().enumerate() {
+        f.position = i as i32;
+    }
+    out
 }

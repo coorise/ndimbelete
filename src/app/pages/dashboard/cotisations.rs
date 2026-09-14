@@ -1268,6 +1268,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                         monthly_amt,
                                                         row_receipt.prior_december_debt,
                                                         pay_date,
+                                                        row_receipt.member.payment_method.clone(),
                                                     )));
                                                 })
                                             >
@@ -1677,6 +1678,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                                 monthly_amt,
                                                                 row_receipt.prior_december_debt,
                                                                 pay_date,
+                                                                row_receipt.member.payment_method.clone(),
                                                             )));
                                                         })
                                                     >

@@ -4,7 +4,8 @@ use tauri::State;
 
 use crate::models::{
     default_a4_fields, default_a4_template, default_mini_fields, default_mini_template,
-    fields_need_receipt_upgrade, maybe_upgrade_short_template, AppSettings, ReceiptField,
+    ensure_payment_method_in_fields, fields_need_receipt_upgrade, maybe_upgrade_short_template,
+    AppSettings, ReceiptField,
 };
 use crate::services::receipt_template::fields_to_template;
 use crate::state::AppState;
@@ -42,6 +43,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     if fields_need_receipt_upgrade(&fields_mini) {
         fields_mini = default_mini_fields();
     }
+    let fields_a4_before = fields_a4.clone();
+    let fields_mini_before = fields_mini.clone();
+    fields_a4 = ensure_payment_method_in_fields(&fields_a4);
+    fields_mini = ensure_payment_method_in_fields(&fields_mini);
     let tpl_a4_upgraded = tpl_a4 != tpl_a4_raw;
     let tpl_mini_upgraded = tpl_mini != tpl_mini_raw;
     if tpl_a4_upgraded || tpl_mini_upgraded {
@@ -60,7 +65,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     let raw_fm = read_setting(&conn, "receipt_fields_mini", "");
     let old_fa: Vec<ReceiptField> = serde_json::from_str(&raw_fa).unwrap_or_default();
     let old_fm: Vec<ReceiptField> = serde_json::from_str(&raw_fm).unwrap_or_default();
-    if raw_fa.trim().is_empty() || fields_need_receipt_upgrade(&old_fa) {
+    if raw_fa.trim().is_empty()
+        || fields_need_receipt_upgrade(&old_fa)
+        || fields_a4 != fields_a4_before
+    {
         if let Ok(fa) = serde_json::to_string(&fields_a4) {
             let _ = conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
@@ -69,7 +77,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
             );
         }
     }
-    if raw_fm.trim().is_empty() || fields_need_receipt_upgrade(&old_fm) {
+    if raw_fm.trim().is_empty()
+        || fields_need_receipt_upgrade(&old_fm)
+        || fields_mini != fields_mini_before
+    {
         if let Ok(fm) = serde_json::to_string(&fields_mini) {
             let _ = conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?1, ?2)

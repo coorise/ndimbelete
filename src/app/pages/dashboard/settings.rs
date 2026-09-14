@@ -79,10 +79,14 @@ fn render_template_preview(tpl: &str, settings: &AppSettings) -> String {
         .replace("{{COTISATION.DAY}}", "15")
         .replace("{{COTISATION.MONTH}}", "07")
         .replace("{{COTISATION.YEAR}}", "2026")
+        .replace("{{PAYMENT_DATE}}", "14/09/2026")
+        .replace("{{YEAR_TOTAL_DUE}}", "120.00 €")
+        .replace("{{PAYMENT_METHOD}}", "Espèces")
         .replace("{{RECEIVED_AMOUNT}}", "20.00 €")
         .replace("{{REMAINING_DEBT}}", "220.00 €")
         .replace("{{PREVIOUS_DEBT}}", "220.00 €")
         .replace("{{NEW_BALANCE}}", "160.00 €")
+        .replace("{{SURPLUS_LINE}}", "")
         .replace("{{DATE}}", &date);
     html_to_preview_text(&filled)
 }
@@ -341,7 +345,7 @@ pub fn SettingsPage() -> impl IntoView {
             <Show when=move || tab.get() == "receipt">
                 <div class="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
                     <p class="text-sm text-[var(--muted)]">
-                        "Placeholders : {{USER.NAME}}, {{USER.CARD}}, {{DATE}}, {{COTISATION.MONTH}} / {{COTISATION.YEAR}}, {{RECEIVED_AMOUNT}}, {{REMAINING_DEBT}} (dette antérieure), {{NEW_BALANCE}} (total payé année), {{ORG.NAME}}, {{ORG.ADDRESS}}. Couleur : Format A4 uniquement — Mini(POS) en noir & blanc."
+                        "Placeholders : {{USER.NAME}}, {{USER.CARD}}, {{DATE}}, {{PAYMENT_DATE}}, {{PAYMENT_METHOD}}, {{COTISATION.MONTH}} / {{COTISATION.YEAR}}, {{YEAR_TOTAL_DUE}}, {{RECEIVED_AMOUNT}}, {{REMAINING_DEBT}}, {{NEW_BALANCE}}, {{ORG.NAME}}, {{ORG.ADDRESS}}. Couleur : Format A4 uniquement — Mini(POS) en noir & blanc."
                     </p>
                     <div class="flex flex-wrap gap-2">
                         <button
