@@ -280,6 +280,7 @@ pub fn PaymentModal(
                                             monthly,
                                             prior,
                                             Some(today_payment_date()),
+                                            m.map(|m| m.payment_method.as_str()).unwrap_or(""),
                                         );
                                         open.set(false);
                                         member_id.set(String::new());

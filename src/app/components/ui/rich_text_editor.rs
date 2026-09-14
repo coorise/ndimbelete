@@ -13,6 +13,7 @@ const PLACEHOLDERS: &[(&str, &str)] = &[
     ("{{PAYMENT_DATE}}", "Date de paiement"),
     ("{{COTISATION.YEAR}}", "Année"),
     ("{{YEAR_TOTAL_DUE}}", "Montant total année"),
+    ("{{PAYMENT_METHOD}}", "Mode de paiement"),
     ("{{RECEIVED_AMOUNT}}", "Montant reçu"),
     ("{{REMAINING_DEBT}}", "Restant à payer"),
     ("{{SURPLUS_LINE}}", "Ligne surplus"),

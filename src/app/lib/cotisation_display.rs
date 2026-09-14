@@ -127,6 +127,7 @@ pub fn build_payment_receipt(
     monthly_amount: f64,
     prior_december_debt: f64,
     payment_date: Option<String>,
+    payment_method: impl AsRef<str>,
 ) -> PaymentReceipt {
     let (_year_total, remaining, _credits, _surplus) =
         receipt_year_figures(monthly_amount, prior_december_debt, total_paid_year, 6);
@@ -148,5 +149,16 @@ pub fn build_payment_receipt(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(today_payment_date),
+        payment_method: payment_method_display(payment_method.as_ref()),
+    }
+}
+
+/// Map stored payment_method codes to receipt labels.
+pub fn payment_method_display(pm: &str) -> String {
+    match pm.trim().to_ascii_lowercase().as_str() {
+        "cash" | "espèces" | "especes" => "Espèces".into(),
+        "bank_transfer" | "bank" | "virement" => "Virement bancaire".into(),
+        "none" | "aucun" | "" => "Aucun".into(),
+        other => other.to_string(),
     }
 }

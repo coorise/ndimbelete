@@ -37,6 +37,8 @@ pub struct ReceiptPrintPayload {
     pub year_total_due: f64,
     #[serde(default)]
     pub surplus_received: Option<f64>,
+    #[serde(default)]
+    pub payment_method: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -53,6 +53,7 @@ fn to_payload(r: &PaymentReceipt, format: &str, settings: &AppSettings) -> Recei
         },
         year_total_due,
         surplus_received: surplus,
+        payment_method: r.payment_method.clone(),
     }
 }
 
@@ -136,6 +137,7 @@ fn preview_text(r: &PaymentReceipt, settings: &AppSettings, mini: bool) -> Strin
         .replace("{{PAYMENT_DATE}}", &payment_date)
         .replace("{{YEAR_TOTAL_DUE}}", &year_total_s)
         .replace("{{SURPLUS_LINE}}", &surplus_s)
+        .replace("{{PAYMENT_METHOD}}", &r.payment_method)
 }
 
 fn chrono_month_guess(label: &str) -> i32 {

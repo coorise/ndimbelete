@@ -47,6 +47,7 @@ pub struct ReceiptContext {
     pub payment_date: String,
     pub year_total_due: String,
     pub surplus_line: String,
+    pub payment_method: String,
 }
 
 fn money(v: f64) -> String {
@@ -92,6 +93,11 @@ impl ReceiptContext {
             payment_date,
             year_total_due: money(year_total),
             surplus_line,
+            payment_method: if p.payment_method.trim().is_empty() {
+                "—".into()
+            } else {
+                p.payment_method.clone()
+            },
         }
     }
 
@@ -113,6 +119,7 @@ impl ReceiptContext {
             .replace("{{PAYMENT_DATE}}", &self.payment_date)
             .replace("{{YEAR_TOTAL_DUE}}", &self.year_total_due)
             .replace("{{SURPLUS_LINE}}", &self.surplus_line)
+            .replace("{{PAYMENT_METHOD}}", &self.payment_method)
     }
 }
 

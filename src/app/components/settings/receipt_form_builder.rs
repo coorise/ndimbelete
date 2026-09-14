@@ -12,10 +12,14 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("{{USER.CARD}}", "N° carte", "card"),
     ("{{DATE}}", "Date / heure", "date"),
     ("Date de paiement : {{PAYMENT_DATE}}", "Date de paiement", "paydate"),
-    (
-        "Montant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}",
+    ("Montant total pour {{COTISATION.YEAR}} : {{YEAR_TOTAL_DUE}}",
         "Montant total année",
         "yeartotal",
+    ),
+    (
+        "Mode de paiement : {{PAYMENT_METHOD}}",
+        "Mode de paiement",
+        "paymethod",
     ),
     ("Montant Reçu : {{RECEIVED_AMOUNT}}", "Montant reçu", "amount"),
     (
