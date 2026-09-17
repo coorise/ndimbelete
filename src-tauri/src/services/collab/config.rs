@@ -78,13 +78,25 @@ pub fn save_config(cfg: &CollabConfig) -> Result<()> {
     Ok(())
 }
 
-/// Load optional `.env` from common locations and return `DATABASE_URL`
-/// (or `NDIMBELENTE_DATABASE_URL`).
+/// Resolve the default collaboration PostgreSQL URI.
+///
+/// Order:
+/// 1. Runtime `DATABASE_URL` / `NDIMBELENTE_DATABASE_URL` (from process env or `.env`)
+/// 2. Compile-time bake from CI (`DEV_DATABASE_URL` / `PROD_DATABASE_URL` →
+///    `NDIMBELENTE_BAKED_DATABASE_URL`) so installed builds ship a default remote
 pub fn default_database_url() -> Option<String> {
     load_dotenv_files();
     std::env::var("DATABASE_URL")
         .or_else(|_| std::env::var("NDIMBELENTE_DATABASE_URL"))
         .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(baked_database_url)
+}
+
+/// URI embedded at compile time by `build.rs` (release workflows).
+fn baked_database_url() -> Option<String> {
+    option_env!("NDIMBELENTE_BAKED_DATABASE_URL")
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }

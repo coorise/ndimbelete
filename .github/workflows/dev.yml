@@ -59,6 +59,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NDIMBELENTE_UPDATE_CHANNEL: dev
+          # Baked into the binary as the default collaboration URI (setup + navbar).
+          NDIMBELENTE_BAKED_DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
         with:
           projectPath: src-tauri
           tagName: dev-v__VERSION__
@@ -67,6 +69,7 @@ jobs:
             Development build from `dev` (prerelease).
 
             Install the Windows setup from the assets below.
+            Collaboration remote defaults to the DEV database when configured.
           releaseDraft: false
           prerelease: true
           args: ${{ matrix.args }}
