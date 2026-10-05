@@ -14,6 +14,8 @@ pub const PERMISSION_OPTIONS: &[(&str, &str)] = &[
     ("settings:write", "Paramètres — écriture"),
     ("staff:read", "Personnel — lecture"),
     ("staff:write", "Personnel — écriture"),
+    ("planning:read", "Planning — lecture"),
+    ("planning:write", "Planning — écriture"),
     ("roles:read", "Rôles — lecture"),
     ("roles:write", "Rôles — écriture"),
     ("collab:push", "Collaboration — envoyer"),
@@ -106,7 +108,9 @@ pub fn can_see_nav(perms: &[String], href: &str) -> bool {
         "/app/staff" => {
             permissions_allow_any(perms, &["staff:read", "staff:write", "roles:read", "roles:write"])
         }
-        "/app/planning" => true, // planning is operational for all logged-in staff
+        "/app/planning" => {
+            permissions_allow_any(perms, &["planning:read", "planning:write"])
+        }
         "/app/members" => permissions_allow_any(perms, &["members:read", "members:write"]),
         "/app/cotisations" => {
             permissions_allow_any(perms, &["cotisations:read", "cotisations:write"])
