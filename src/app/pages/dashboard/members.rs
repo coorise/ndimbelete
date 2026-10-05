@@ -7,7 +7,7 @@ use crate::app::components::ui::{
     TabItem, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td,
     TextArea, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
 };
-use crate::app::hooks::use_table_fullscreen;
+use crate::app::hooks::{use_auth, use_table_fullscreen};
 use crate::app::lib::{
     api, member_permission_label, normalize_permissions, parse_permissions_list, CreateMemberInput,
     CreateMemberRoleInput, Member, MemberRole, UpdateMemberInput, UpdateMemberRoleInput,
@@ -99,6 +99,9 @@ fn toggle_member_permission(selected: RwSignal<Vec<String>>, key: String) {
 #[component]
 pub fn MembersPage() -> impl IntoView {
     let fs = use_table_fullscreen();
+    let auth = use_auth();
+    let can_write = auth.can("members:write");
+    let can_read = auth.can_any(&["members:read", "members:write"]);
     let tab = RwSignal::new("members");
     let roles = RwSignal::new(Vec::<MemberRole>::new());
     let page_error = RwSignal::new(Option::<String>::None);
@@ -119,6 +122,13 @@ pub fn MembersPage() -> impl IntoView {
         reload_roles();
     });
 
+    Effect::new(move |_| {
+        if !can_write.get() && tab.get() == "roles" {
+            // Read-only users stay on the members list (roles editing requires write).
+            tab.set("members".into());
+        }
+    });
+
     view! {
         <div class="flex min-h-0 flex-1 flex-col gap-4">
             <Show when=move || !fs.active.get()>
@@ -132,20 +142,21 @@ pub fn MembersPage() -> impl IntoView {
                 </div>
             </Show>
 
-            <Show when=move || !fs.active.get()>
+            <Show when=move || !fs.active.get() && can_read.get()>
                 <div class="shrink-0">
                     <Tabs
-                        items=Signal::derive(|| {
-                            vec![
-                                TabItem {
-                                    id: "members",
-                                    label: "Membres".into(),
-                                },
-                                TabItem {
+                        items=Signal::derive(move || {
+                            let mut items = vec![TabItem {
+                                id: "members",
+                                label: "Membres".into(),
+                            }];
+                            if can_write.get() {
+                                items.push(TabItem {
                                     id: "roles",
                                     label: "Rôles".into(),
-                                },
-                            ]
+                                });
+                            }
+                            items
                         })
                         active=tab
                     />
@@ -157,9 +168,9 @@ pub fn MembersPage() -> impl IntoView {
             </Show>
 
             <Show when=move || tab.get() == "members">
-                <MembersList roles=roles />
+                <MembersList roles=roles can_write=can_write />
             </Show>
-            <Show when=move || tab.get() == "roles" && !fs.active.get()>
+            <Show when=move || tab.get() == "roles" && can_write.get() && !fs.active.get()>
                 <div class="min-h-0 flex-1 overflow-auto">
                     <MemberRolesTab roles=roles on_change=Callback::new(move |_| reload_roles()) />
                 </div>
@@ -169,7 +180,10 @@ pub fn MembersPage() -> impl IntoView {
 }
 
 #[component]
-fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
+fn MembersList(
+    roles: RwSignal<Vec<MemberRole>>,
+    can_write: Signal<bool>,
+) -> impl IntoView {
     let members = RwSignal::new(Vec::<Member>::new());
     let query = RwSignal::new(String::new());
     let error = RwSignal::new(Option::<String>::None);
@@ -393,7 +407,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                             "Grille"
                         </button>
                     </div>
-                    <Show when=move || !fs.active.get()>
+                    <Show when=move || !fs.active.get() && can_write.get()>
                         <Button on_click=Callback::new(move |_| {
                             editing.set(None);
                             reset_form();
@@ -402,7 +416,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                             "Nouveau membre"
                         </Button>
                     </Show>
-                    <Show when=move || !selected.get().is_empty()>
+                    <Show when=move || can_write.get() && !selected.get().is_empty()>
                         <Button
                             variant=ButtonVariant::Danger
                             on_click=Callback::new(move |_| {
@@ -588,17 +602,17 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                             <span class="text-[var(--muted)]">"Paiement : "</span>
                                             {pm}
                                         </p>
-                                        <div class="mt-4">
-                                            <Button
-                                                variant=ButtonVariant::Secondary
-                                                on_click=Callback::new(move |_| {
-                                                    editing.set(Some(m2.clone()));
-                                                    fill_form(&m2);
-                                                    open.set(true);
-                                                })
-                                            >
-                                                "Modifier"
-                                            </Button>
+                                        <div class="mt-4" class:hidden=move || !can_write.get()>
+                                                <Button
+                                                    variant=ButtonVariant::Secondary
+                                                    on_click=Callback::new(move |_| {
+                                                        editing.set(Some(m2.clone()));
+                                                        fill_form(&m2);
+                                                        open.set(true);
+                                                    })
+                                                >
+                                                    "Modifier"
+                                                </Button>
                                         </div>
                                     </div>
                                 }
@@ -690,6 +704,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                 <input
                                                     type="checkbox"
                                                     class="h-4 w-4"
+                                                    class:hidden=move || !can_write.get()
                                                     prop:checked=move || {
                                                         selected.get().iter().any(|id| id == &mid_check)
                                                     }
@@ -710,6 +725,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_card.clone(), "card_number", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -718,6 +734,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_last.clone(), "last_name", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -726,6 +743,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_first.clone(), "first_name", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>{role_name}</Td>
@@ -736,6 +754,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_city.clone(), "city", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -744,6 +763,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_phone.clone(), "phone", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -753,6 +773,7 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                         queue_edit(id_fee.clone(), "adhesion_fee", v)
                                                     })
                                                     input_type="number"
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -765,16 +786,18 @@ fn MembersList(roles: RwSignal<Vec<MemberRole>>) -> impl IntoView {
                                                 </Badge>
                                             </Td>
                                             <Td>
-                                                <Button
-                                                    variant=ButtonVariant::Secondary
-                                                    on_click=Callback::new(move |_| {
-                                                        editing.set(Some(m2.clone()));
-                                                        fill_form(&m2);
-                                                        open.set(true);
-                                                    })
-                                                >
-                                                    "Modifier"
-                                                </Button>
+                                                <div class:hidden=move || !can_write.get()>
+                                                    <Button
+                                                        variant=ButtonVariant::Secondary
+                                                        on_click=Callback::new(move |_| {
+                                                            editing.set(Some(m2.clone()));
+                                                            fill_form(&m2);
+                                                            open.set(true);
+                                                        })
+                                                    >
+                                                        "Modifier"
+                                                    </Button>
+                                                </div>
                                             </Td>
                                         </Tr>
                                     }

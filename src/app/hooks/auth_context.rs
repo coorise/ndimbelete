@@ -66,6 +66,35 @@ impl AuthContext {
             self.session.set(None);
         });
     }
+
+    /// Reactive check for a single permission key (`*` and write→read included).
+    pub fn can(self, key: &'static str) -> Signal<bool> {
+        Signal::derive(move || {
+            self.session
+                .get()
+                .map(|s| crate::app::lib::permissions_allow(&s.permissions, key))
+                .unwrap_or(false)
+        })
+    }
+
+    /// Reactive check: any of the listed permissions.
+    pub fn can_any(self, keys: &'static [&'static str]) -> Signal<bool> {
+        Signal::derive(move || {
+            self.session
+                .get()
+                .map(|s| crate::app::lib::permissions_allow_any(&s.permissions, keys))
+                .unwrap_or(false)
+        })
+    }
+
+    pub fn is_founder(self) -> Signal<bool> {
+        Signal::derive(move || {
+            self.session
+                .get()
+                .map(|s| s.staff.username == "root" || s.staff.is_founder)
+                .unwrap_or(false)
+        })
+    }
 }
 
 pub fn provide_auth() -> AuthContext {

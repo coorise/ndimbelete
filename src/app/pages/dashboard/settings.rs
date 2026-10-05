@@ -5,6 +5,7 @@ use crate::app::components::settings::ReceiptFormBuilder;
 use crate::app::components::ui::{
     Button, ButtonVariant, Input, RichTextEditor, TabItem, Tabs, TextArea,
 };
+use crate::app::hooks::use_auth;
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
     api, apply_font_scale, apply_theme_color, AppSettings, ReceiptField,
@@ -94,11 +95,14 @@ fn render_template_preview(tpl: &str, settings: &AppSettings) -> String {
 #[component]
 pub fn SettingsPage() -> impl IntoView {
     let i18n = use_i18n();
+    let auth = use_auth();
+    let can_write = auth.can("settings:write");
     let settings = RwSignal::new(AppSettings::default());
     let message = RwSignal::new(Option::<String>::None);
     let error = RwSignal::new(Option::<String>::None);
     let tab = RwSignal::new("general");
     let receipt_mode = RwSignal::new("mini".to_string());
+    let inputs_readonly = Signal::derive(move || !can_write.get());
 
     Effect::new(move |_| {
         spawn_local(async move {
@@ -223,6 +227,7 @@ pub fn SettingsPage() -> impl IntoView {
                         label="Nom de l’organisation"
                         value=org_name
                         on_input=Callback::new(move |v| settings.update(|s| s.org_name = v))
+                        disabled_signal=inputs_readonly
                     />
                     <TextArea
                         label="Description"
@@ -233,12 +238,14 @@ pub fn SettingsPage() -> impl IntoView {
                         label="Adresse"
                         value=org_address
                         on_input=Callback::new(move |v| settings.update(|s| s.org_address = v))
+                        disabled_signal=inputs_readonly
                     />
                     <Input
                         label="Unité / devise"
                         value=currency_unit
                         on_input=Callback::new(move |v| settings.update(|s| s.currency_unit = v))
                         placeholder="EUR"
+                        disabled_signal=inputs_readonly
                     />
                     <Input
                         label="Couleur du thème"
@@ -248,6 +255,7 @@ pub fn SettingsPage() -> impl IntoView {
                             apply_theme_color(&v);
                             settings.update(|s| s.theme_color = v);
                         })
+                        disabled_signal=inputs_readonly
                     />
                     <label class="flex flex-col gap-1.5 text-sm font-medium">
                         <span>
@@ -262,6 +270,7 @@ pub fn SettingsPage() -> impl IntoView {
                             step="0.05"
                             class="tap-target w-full"
                             prop:value=move || settings.get().font_scale
+                            prop:disabled=move || inputs_readonly.get()
                             on:input=move |ev| {
                                 if let Ok(v) = event_target_value(&ev).parse::<f64>() {
                                     settings.update(|s| s.font_scale = v);
@@ -275,6 +284,7 @@ pub fn SettingsPage() -> impl IntoView {
                         value=logo_path
                         on_input=Callback::new(move |v| settings.update(|s| s.logo_path = v))
                         placeholder="C:/chemin/logo.png"
+                        disabled_signal=inputs_readonly
                     />
 
                     <div class="mt-2 flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
@@ -320,24 +330,26 @@ pub fn SettingsPage() -> impl IntoView {
                         >
                             "Importer les données"
                         </Button>
-                        <Button on_click=Callback::new(move |_| {
-                            message.set(None);
-                            error.set(None);
-                            let s = settings.get_untracked();
-                            spawn_local(async move {
-                                match api::update_settings(&s).await {
-                                    Ok(saved) => {
-                                        settings.set(saved.clone());
-                                        apply_font_scale(saved.font_scale);
-                                        apply_theme_color(&saved.theme_color);
-                                        message.set(Some("Paramètres enregistrés.".into()));
+                        <Show when=move || can_write.get()>
+                            <Button on_click=Callback::new(move |_| {
+                                message.set(None);
+                                error.set(None);
+                                let s = settings.get_untracked();
+                                spawn_local(async move {
+                                    match api::update_settings(&s).await {
+                                        Ok(saved) => {
+                                            settings.set(saved.clone());
+                                            apply_font_scale(saved.font_scale);
+                                            apply_theme_color(&saved.theme_color);
+                                            message.set(Some("Paramètres enregistrés.".into()));
+                                        }
+                                        Err(e) => error.set(Some(e)),
                                     }
-                                    Err(e) => error.set(Some(e)),
-                                }
-                            });
-                        })>
-                            "Enregistrer"
-                        </Button>
+                                });
+                            })>
+                                "Enregistrer"
+                            </Button>
+                        </Show>
                     </div>
                 </div>
             </Show>
@@ -415,6 +427,7 @@ pub fn SettingsPage() -> impl IntoView {
                                     settings.update(|s| s.receipt_mini_width_mm = n);
                                 }
                             })
+                            disabled_signal=inputs_readonly
                         />
                     </Show>
 
@@ -423,6 +436,9 @@ pub fn SettingsPage() -> impl IntoView {
                             value=template_html
                             allow_color=Signal::derive(move || allow_color.get())
                             on_change=Callback::new(move |html: String| {
+                                if !can_write.get_untracked() {
+                                    return;
+                                }
                                 settings.update(|s| {
                                     if receipt_mode.get_untracked() == "mini" {
                                         s.receipt_template_mini = html;
@@ -439,6 +455,9 @@ pub fn SettingsPage() -> impl IntoView {
                             fields=fields_list
                             allow_color=Signal::derive(move || allow_color.get())
                             on_change=Callback::new(move |list: Vec<ReceiptField>| {
+                                if !can_write.get_untracked() {
+                                    return;
+                                }
                                 settings.update(|s| {
                                     if receipt_mode.get_untracked() == "mini" {
                                         s.receipt_fields_mini = list;
@@ -471,40 +490,42 @@ pub fn SettingsPage() -> impl IntoView {
                         </pre>
                     </div>
 
-                    <div class="flex flex-wrap justify-end gap-2">
-                        <Button
-                            variant=ButtonVariant::Secondary
-                            on_click=Callback::new(move |_| {
-                                settings.update(|s| {
-                                    let d = AppSettings::default();
-                                    if receipt_mode.get_untracked() == "mini" {
-                                        s.receipt_template_mini = d.receipt_template_mini;
-                                        s.receipt_fields_mini = d.receipt_fields_mini;
-                                    } else {
-                                        s.receipt_template_a4 = d.receipt_template_a4;
-                                        s.receipt_fields_a4 = d.receipt_fields_a4;
+                    <Show when=move || can_write.get()>
+                        <div class="flex flex-wrap justify-end gap-2">
+                            <Button
+                                variant=ButtonVariant::Secondary
+                                on_click=Callback::new(move |_| {
+                                    settings.update(|s| {
+                                        let d = AppSettings::default();
+                                        if receipt_mode.get_untracked() == "mini" {
+                                            s.receipt_template_mini = d.receipt_template_mini;
+                                            s.receipt_fields_mini = d.receipt_fields_mini;
+                                        } else {
+                                            s.receipt_template_a4 = d.receipt_template_a4;
+                                            s.receipt_fields_a4 = d.receipt_fields_a4;
+                                        }
+                                    });
+                                    message.set(Some("Modèle réinitialisé (non enregistré).".into()));
+                                })
+                            >
+                                "Réinitialiser le modèle"
+                            </Button>
+                            <Button on_click=Callback::new(move |_| {
+                                let s = settings.get_untracked();
+                                spawn_local(async move {
+                                    match api::update_settings(&s).await {
+                                        Ok(saved) => {
+                                            settings.set(saved);
+                                            message.set(Some("Modèle de reçu enregistré.".into()));
+                                        }
+                                        Err(e) => error.set(Some(e)),
                                     }
                                 });
-                                message.set(Some("Modèle réinitialisé (non enregistré).".into()));
-                            })
-                        >
-                            "Réinitialiser le modèle"
-                        </Button>
-                        <Button on_click=Callback::new(move |_| {
-                            let s = settings.get_untracked();
-                            spawn_local(async move {
-                                match api::update_settings(&s).await {
-                                    Ok(saved) => {
-                                        settings.set(saved);
-                                        message.set(Some("Modèle de reçu enregistré.".into()));
-                                    }
-                                    Err(e) => error.set(Some(e)),
-                                }
-                            });
-                        })>
-                            "Enregistrer le modèle"
-                        </Button>
-                    </div>
+                            })>
+                                "Enregistrer le modèle"
+                            </Button>
+                        </div>
+                    </Show>
                 </div>
             </Show>
             </div>

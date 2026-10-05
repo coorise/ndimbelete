@@ -86,22 +86,21 @@ pub fn CollaborationPage() -> impl IntoView {
         load();
     });
 
+    let is_founder = auth.is_founder();
     let can_manage_settings = Signal::derive(move || {
-        auth.session.get().map(|s| {
-            s.staff.is_founder
-                || s.permissions.iter().any(|p| {
-                    p == "*" || p == "staff:write" || p == "settings:write" || p == "collab:manage"
-                })
-        })
-        .unwrap_or(false)
+        is_founder.get()
+            || auth
+                .can_any(&["*", "settings:write", "collab:manage", "staff:write"])
+                .get()
+    });
+    let can_push_action = Signal::derive(move || {
+        is_founder.get()
+            || auth
+                .can_any(&["collab:push", "collab:manage", "*"])
+                .get()
     });
 
-    let is_root = Signal::derive(move || {
-        auth.session
-            .get()
-            .map(|s| s.staff.is_founder)
-            .unwrap_or(false)
-    });
+    let is_root = is_founder;
 
     let tab_items = Signal::derive(move || {
         let mut items = vec![
@@ -357,41 +356,46 @@ pub fn CollaborationPage() -> impl IntoView {
 
             // Row 2: Push / Pull
             <div class="flex flex-wrap items-center gap-2">
-                <button
-                    type="button"
-                    class=move || {
-                        let dirty = status.get().map(|s| s.dirty && s.local_change_count > 0).unwrap_or(false);
-                        let can = status.get().map(|s| s.connected && s.can_push).unwrap_or(false);
-                        if !can {
-                            "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm font-semibold opacity-50"
-                        } else if dirty {
-                            "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--brand)] bg-[var(--brand)] px-3 py-2.5 text-sm font-semibold text-white animate-pulse"
-                        } else {
-                            "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--brand)] bg-[var(--brand)] px-3 py-2.5 text-sm font-semibold text-white"
+                <Show when=move || {
+                    can_push_action.get()
+                        && status.get().map(|s| s.can_push).unwrap_or(false)
+                }>
+                    <button
+                        type="button"
+                        class=move || {
+                            let dirty = status.get().map(|s| s.dirty && s.local_change_count > 0).unwrap_or(false);
+                            let can = status.get().map(|s| s.connected && s.can_push).unwrap_or(false);
+                            if !can {
+                                "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm font-semibold opacity-50"
+                            } else if dirty {
+                                "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--brand)] bg-[var(--brand)] px-3 py-2.5 text-sm font-semibold text-white animate-pulse"
+                            } else {
+                                "relative tap-target inline-flex items-center gap-1 rounded-xl border border-[var(--brand)] bg-[var(--brand)] px-3 py-2.5 text-sm font-semibold text-white"
+                            }
                         }
-                    }
-                    disabled=move || {
-                        busy.get()
-                            || !status.get().map(|s| s.connected && s.can_push).unwrap_or(false)
-                    }
-                    on:click=move |_| do_push()
-                >
-                    <span aria-hidden="true">"↑"</span>
-                    {move || i18n.t("collab.push")}
-                    <Show when=move || {
-                        status.get().map(|s| s.dirty && s.local_change_count > 0).unwrap_or(false)
-                    }>
-                        <span class="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--brand-red)] px-1 text-[10px] font-bold text-white">
-                            {move || {
-                                status
-                                    .get()
-                                    .map(|s| s.local_change_count)
-                                    .unwrap_or(0)
-                                    .to_string()
-                            }}
-                        </span>
-                    </Show>
-                </button>
+                        disabled=move || {
+                            busy.get()
+                                || !status.get().map(|s| s.connected && s.can_push).unwrap_or(false)
+                        }
+                        on:click=move |_| do_push()
+                    >
+                        <span aria-hidden="true">"↑"</span>
+                        {move || i18n.t("collab.push")}
+                        <Show when=move || {
+                            status.get().map(|s| s.dirty && s.local_change_count > 0).unwrap_or(false)
+                        }>
+                            <span class="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--brand-red)] px-1 text-[10px] font-bold text-white">
+                                {move || {
+                                    status
+                                        .get()
+                                        .map(|s| s.local_change_count)
+                                        .unwrap_or(0)
+                                        .to_string()
+                                }}
+                            </span>
+                        </Show>
+                    </button>
+                </Show>
                 <button
                     type="button"
                     class=move || {
@@ -429,7 +433,10 @@ pub fn CollaborationPage() -> impl IntoView {
                 </button>
             </div>
 
-            <Show when=move || status.get().map(|s| s.connected && s.can_push).unwrap_or(false)>
+            <Show when=move || {
+                can_push_action.get()
+                    && status.get().map(|s| s.connected && s.can_push).unwrap_or(false)
+            }>
                 <Input
                     label_key="collab.version_note"
                     value=push_msg.into()

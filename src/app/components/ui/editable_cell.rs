@@ -13,6 +13,9 @@ pub fn EditableCell(
     #[prop(optional)] class: &'static str,
     #[prop(optional)] input_type: &'static str,
     #[prop(optional)] placeholder: &'static str,
+    /// When true, render plain text (no click-to-edit).
+    #[prop(optional, default = Signal::derive(|| false))]
+    readonly: Signal<bool>,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
     let draft = RwSignal::new(String::new());
@@ -22,9 +25,10 @@ pub fn EditableCell(
     } else {
         input_type
     };
+    let is_readonly = readonly;
 
     Effect::new(move |_| {
-        if editing.get() {
+        if editing.get() && !is_readonly.get() {
             if let Some(el) = input_ref.get() {
                 let _ = el.focus();
                 let _ = el.select();
@@ -33,7 +37,7 @@ pub fn EditableCell(
     });
 
     let commit = move || {
-        if !editing.get_untracked() {
+        if !editing.get_untracked() || is_readonly.get_untracked() {
             return;
         }
         let next = draft.get_untracked();
@@ -47,27 +51,45 @@ pub fn EditableCell(
     view! {
         <div class=cn(&["editable-cell min-w-[3.5rem]", class])>
             <Show
-                when=move || editing.get()
+                when=move || editing.get() && !is_readonly.get()
                 fallback=move || {
                     view! {
-                        <button
-                            type="button"
-                            class="editable-cell-display w-full rounded px-1 py-0.5 text-left hover:bg-[color-mix(in_srgb,var(--brand-yellow)_28%,transparent)]"
-                            title="Cliquer pour modifier"
-                            on:click=move |_| {
-                                draft.set(value.get_untracked());
-                                editing.set(true);
+                        <Show
+                            when=move || is_readonly.get()
+                            fallback=move || {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="editable-cell-display w-full rounded px-1 py-0.5 text-left hover:bg-[color-mix(in_srgb,var(--brand-yellow)_28%,transparent)]"
+                                        title="Cliquer pour modifier"
+                                        on:click=move |_| {
+                                            draft.set(value.get_untracked());
+                                            editing.set(true);
+                                        }
+                                    >
+                                        {move || {
+                                            let v = value.get();
+                                            if v.is_empty() {
+                                                placeholder.to_string()
+                                            } else {
+                                                v
+                                            }
+                                        }}
+                                    </button>
+                                }
                             }
                         >
-                            {move || {
-                                let v = value.get();
-                                if v.is_empty() {
-                                    placeholder.to_string()
-                                } else {
-                                    v
-                                }
-                            }}
-                        </button>
+                            <span class="editable-cell-display block w-full rounded px-1 py-0.5 text-left text-[var(--fg)]">
+                                {move || {
+                                    let v = value.get();
+                                    if v.is_empty() {
+                                        placeholder.to_string()
+                                    } else {
+                                        v
+                                    }
+                                }}
+                            </span>
+                        </Show>
                     }
                 }
             >
@@ -81,7 +103,6 @@ pub fn EditableCell(
                     on:keydown=move |ev| {
                         let key = ev.key();
                         if key == "Enter" || key == "Tab" {
-                            // Tab: commit then allow default focus move to next cell.
                             if key == "Enter" {
                                 ev.prevent_default();
                             }

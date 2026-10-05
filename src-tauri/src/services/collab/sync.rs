@@ -124,6 +124,10 @@ fn can_user_push(conn: &Connection, staff_id: Option<&str>, cfg: &CollabConfig) 
     if root_staff_id(conn).as_deref() == Some(sid) {
         return true;
     }
+    // Role must include collab:push, collab:manage, or *.
+    if !staff_has_push_permission(conn, sid) {
+        return false;
+    }
     if cfg.push_role_ids.is_empty() && cfg.push_staff_ids.is_empty() {
         return true;
     }
@@ -136,6 +140,38 @@ fn can_user_push(conn: &Connection, staff_id: Option<&str>, cfg: &CollabConfig) 
     let role_id: Result<String, _> =
         conn.query_row("SELECT role_id FROM staff WHERE id = ?1", [sid], |r| r.get(0));
     matches!(role_id, Ok(rid) if cfg.push_role_ids.iter().any(|id| id == &rid))
+}
+
+fn staff_has_push_permission(conn: &Connection, staff_id: &str) -> bool {
+    let perms_json: String = conn
+        .query_row(
+            "SELECT r.permissions_json
+             FROM staff s
+             JOIN roles r ON r.id = s.role_id
+             WHERE s.id = ?1",
+            [staff_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    let perms = parse_role_permissions(&perms_json);
+    perms.iter().any(|p| {
+        p == "*" || p == "collab:push" || p == "collab:manage"
+    })
+}
+
+fn parse_role_permissions(raw: &str) -> Vec<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(v) = serde_json::from_str::<Vec<String>>(t) {
+        return v;
+    }
+    t.trim_matches(|c| c == '[' || c == ']')
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 pub fn status(conn: &Connection, staff_id: Option<&str>) -> Result<CollabStatus> {

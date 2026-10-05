@@ -7,7 +7,7 @@ use crate::app::components::ui::{
     TabItem, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td, Th,
     THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
 };
-use crate::app::hooks::use_table_fullscreen;
+use crate::app::hooks::{use_auth, use_table_fullscreen};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
     api, parse_permissions_list, normalize_permissions, CreateRoleInput, CreateStaffInput, Role, Staff,
@@ -54,6 +54,11 @@ fn toggle_permission(selected: RwSignal<Vec<String>>, key: String) {
 #[component]
 pub fn StaffPage() -> impl IntoView {
     let i18n = use_i18n();
+    let auth = use_auth();
+    let can_staff_read = auth.can_any(&["staff:read", "staff:write"]);
+    let can_staff_write = auth.can("staff:write");
+    let can_roles_read = auth.can_any(&["roles:read", "roles:write"]);
+    let can_roles_write = auth.can("roles:write");
     let tab = RwSignal::new("staff");
     let staff = RwSignal::new(Vec::<Staff>::new());
     let roles = RwSignal::new(Vec::<Role>::new());
@@ -74,6 +79,24 @@ pub fn StaffPage() -> impl IntoView {
 
     Effect::new(move |_| reload());
 
+    Effect::new(move |_| {
+        let t = tab.get();
+        let staff_ok = can_staff_read.get();
+        let roles_ok = can_roles_read.get();
+        let allowed = match t {
+            "staff" => staff_ok,
+            "roles" => roles_ok,
+            _ => false,
+        };
+        if !allowed {
+            if staff_ok {
+                tab.set("staff");
+            } else if roles_ok {
+                tab.set("roles");
+            }
+        }
+    });
+
     let fs = use_table_fullscreen();
 
     view! {
@@ -87,20 +110,24 @@ pub fn StaffPage() -> impl IntoView {
                 </div>
             </Show>
 
-            <Show when=move || !fs.active.get()>
+            <Show when=move || !fs.active.get() && (can_staff_read.get() || can_roles_read.get())>
                 <div class="shrink-0">
                     <Tabs
-                        items=Signal::derive(|| {
-                            vec![
-                                TabItem {
+                        items=Signal::derive(move || {
+                            let mut items = Vec::new();
+                            if can_staff_read.get() {
+                                items.push(TabItem {
                                     id: "staff",
                                     label: "Personnel".into(),
-                                },
-                                TabItem {
+                                });
+                            }
+                            if can_roles_read.get() {
+                                items.push(TabItem {
                                     id: "roles",
                                     label: "Rôles".into(),
-                                },
-                            ]
+                                });
+                            }
+                            items
                         })
                         active=tab
                     />
@@ -111,16 +138,21 @@ pub fn StaffPage() -> impl IntoView {
                 <p class="shrink-0 text-[var(--brand-red)]">{move || error.get().unwrap_or_default()}</p>
             </Show>
 
-            <Show when=move || tab.get() == "staff">
+            <Show when=move || tab.get() == "staff" && can_staff_read.get()>
                 <StaffTab
                     staff=staff
                     roles=Signal::derive(move || roles.get())
+                    can_write=can_staff_write
                     on_change=Callback::new(move |_| reload())
                 />
             </Show>
-            <Show when=move || tab.get() == "roles" && !fs.active.get()>
+            <Show when=move || tab.get() == "roles" && can_roles_read.get() && !fs.active.get()>
                 <div class="min-h-0 flex-1 overflow-auto">
-                    <RolesTab roles=roles on_change=Callback::new(move |_| reload()) />
+                    <RolesTab
+                        roles=roles
+                        can_write=can_roles_write
+                        on_change=Callback::new(move |_| reload())
+                    />
                 </div>
             </Show>
         </div>
@@ -131,6 +163,7 @@ pub fn StaffPage() -> impl IntoView {
 fn StaffTab(
     staff: RwSignal<Vec<Staff>>,
     roles: Signal<Vec<Role>>,
+    can_write: Signal<bool>,
     #[prop(into)] on_change: Callback<()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
@@ -323,10 +356,10 @@ fn StaffTab(
                         "Grille"
                     </button>
                 </div>
-                <Show when=move || !fs.active.get()>
+                <Show when=move || !fs.active.get() && can_write.get()>
                     <Button on_click=Callback::new(open_create)>"Nouveau staff"</Button>
                 </Show>
-                <Show when=move || !selected.get().is_empty()>
+                <Show when=move || can_write.get() && !selected.get().is_empty()>
                     <Button
                         variant=ButtonVariant::Danger
                         on_click=Callback::new(move |_| {
@@ -359,7 +392,7 @@ fn StaffTab(
                 </Show>
             </div>
 
-            <Show when=move || !pending.get().is_empty()>
+            <Show when=move || can_write.get() && !pending.get().is_empty()>
                 <div class="sticky top-0 z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--brand)] bg-[var(--surface)] px-4 py-3 shadow-[var(--shadow)]">
                     <p class="text-sm font-medium">
                         {move || format!("{} modification(s) en attente", pending.get().len())}
@@ -476,7 +509,7 @@ fn StaffTab(
                                             <span class="text-[var(--muted)]">"Rôle : "</span>
                                             {role_v}
                                         </p>
-                                        <div class="mt-4 flex flex-wrap gap-2">
+                                        <div class="mt-4 flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
                                             <Button
                                                 variant=ButtonVariant::Secondary
                                                 on_click=Callback::new(move |_| open_edit(s_edit.clone()))
@@ -505,6 +538,7 @@ fn StaffTab(
                                 <input
                                     type="checkbox"
                                     class="h-4 w-4"
+                                    class:hidden=move || !can_write.get()
                                     prop:checked=move || {
                                         let list = visible.get();
                                         let sel = selected.get();
@@ -580,6 +614,7 @@ fn StaffTab(
                                                 <input
                                                     type="checkbox"
                                                     class="h-4 w-4"
+                                                    class:hidden=move || !can_write.get()
                                                     prop:checked=move || {
                                                         selected.get().iter().any(|x| x == &id_check)
                                                     }
@@ -600,6 +635,7 @@ fn StaffTab(
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_last.clone(), "last_name", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -608,6 +644,7 @@ fn StaffTab(
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_first.clone(), "first_name", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>
@@ -616,6 +653,7 @@ fn StaffTab(
                                                     on_commit=Callback::new(move |v| {
                                                         queue_edit(id_user.clone(), "username", v)
                                                     })
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             <Td>{s.role_name.clone().unwrap_or_default()}</Td>
@@ -625,7 +663,7 @@ fn StaffTab(
                                                 </Badge>
                                             </Td>
                                             <Td>
-                                                <div class="flex flex-wrap gap-2">
+                                                <div class="flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
                                                     <Button
                                                         variant=ButtonVariant::Secondary
                                                         on_click=Callback::new(move |_| open_edit(s_edit.clone()))
@@ -737,6 +775,7 @@ fn StaffTab(
 #[component]
 fn RolesTab(
     roles: RwSignal<Vec<Role>>,
+    can_write: Signal<bool>,
     #[prop(into)] on_change: Callback<()>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
@@ -751,17 +790,19 @@ fn RolesTab(
 
     view! {
         <div class="flex flex-col gap-4">
-            <div class="flex justify-end">
-                <Button on_click=Callback::new(move |_| {
-                    editing.set(None);
-                    name.set(String::new());
-                    selected_permissions.set(vec!["*".into()]);
-                    form_error.set(None);
-                    open.set(true);
-                })>
-                    "Nouveau rôle"
-                </Button>
-            </div>
+            <Show when=move || can_write.get()>
+                <div class="flex justify-end">
+                    <Button on_click=Callback::new(move |_| {
+                        editing.set(None);
+                        name.set(String::new());
+                        selected_permissions.set(vec!["*".into()]);
+                        form_error.set(None);
+                        open.set(true);
+                    })>
+                        "Nouveau rôle"
+                    </Button>
+                </div>
+            </Show>
 
             <Table>
                 <THead>
@@ -794,20 +835,22 @@ fn RolesTab(
                                         </div>
                                     </Td>
                                     <Td>
-                                        <Button
-                                            variant=ButtonVariant::Secondary
-                                            on_click=Callback::new(move |_| {
-                                                editing.set(Some(r_edit.clone()));
-                                                name.set(r_edit.name.clone());
-                                                selected_permissions.set(
-                                                    parse_permissions_list(&r_edit.permissions_json),
-                                                );
-                                                form_error.set(None);
-                                                open.set(true);
-                                            })
-                                        >
-                                            "Modifier"
-                                        </Button>
+                                        <div class:hidden=move || !can_write.get()>
+                                            <Button
+                                                variant=ButtonVariant::Secondary
+                                                on_click=Callback::new(move |_| {
+                                                    editing.set(Some(r_edit.clone()));
+                                                    name.set(r_edit.name.clone());
+                                                    selected_permissions.set(
+                                                        parse_permissions_list(&r_edit.permissions_json),
+                                                    );
+                                                    form_error.set(None);
+                                                    open.set(true);
+                                                })
+                                            >
+                                                "Modifier"
+                                            </Button>
+                                        </div>
                                     </Td>
                                 </Tr>
                             }

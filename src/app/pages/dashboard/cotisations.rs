@@ -11,7 +11,7 @@ use crate::app::components::ui::{
     TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count,
     paginate_slice,
 };
-use crate::app::hooks::use_table_fullscreen;
+use crate::app::hooks::{use_auth, use_table_fullscreen};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{
     api, build_payment_receipt, debt_text_class, format_stored_money, is_intuitive_sign,
@@ -165,6 +165,10 @@ fn sort_arrow(active: bool, asc: bool) -> &'static str {
 #[component]
 pub fn CotisationsPage() -> impl IntoView {
     let i18n = use_i18n();
+    let auth = use_auth();
+    let can_write = auth.can("cotisations:write");
+    let can_import = auth.can("excel:import");
+    let can_export = auth.can("excel:export");
     let year = RwSignal::new(chrono::Local::now().year());
     let grid = RwSignal::new(Option::<YearGrid>::None);
     let monthly = RwSignal::new(String::new());
@@ -624,39 +628,45 @@ pub fn CotisationsPage() -> impl IntoView {
                     <p class="text-[var(--muted)]">{move || i18n.t("cotisations.subtitle")}</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                    <Button on_click=Callback::new(move |_| {
-                        prefill_member.set(String::new());
-                        pay_open.set(true);
-                    })>
-                        {move || i18n.t("cotisations.new")}
-                    </Button>
-                    <Button variant=ButtonVariant::Secondary on_click=Callback::new(move |_| import_open.set(true))>
-                        {move || i18n.t("common.import")}
-                    </Button>
-                    <Button
-                        variant=ButtonVariant::Secondary
-                        on_click=Callback::new(move |_| {
-                            let y = year.get_untracked();
-                            spawn_local(async move {
-                                let default = format!("cotisations-{y}.xlsx");
-                                let path = match api::pick_save_file(&default).await {
-                                    Some(p) => p,
-                                    None => return,
-                                };
-                                match api::export_excel(&path, y).await {
-                                    Ok(res) => {
-                                        error.set(None);
-                                        web_sys::console::log_1(
-                                            &format!("Exporté {} lignes → {}", res.rows_written, res.path).into(),
-                                        );
+                    <Show when=move || can_write.get()>
+                        <Button on_click=Callback::new(move |_| {
+                            prefill_member.set(String::new());
+                            pay_open.set(true);
+                        })>
+                            {move || i18n.t("cotisations.new")}
+                        </Button>
+                    </Show>
+                    <Show when=move || can_import.get()>
+                        <Button variant=ButtonVariant::Secondary on_click=Callback::new(move |_| import_open.set(true))>
+                            {move || i18n.t("common.import")}
+                        </Button>
+                    </Show>
+                    <Show when=move || can_export.get()>
+                        <Button
+                            variant=ButtonVariant::Secondary
+                            on_click=Callback::new(move |_| {
+                                let y = year.get_untracked();
+                                spawn_local(async move {
+                                    let default = format!("cotisations-{y}.xlsx");
+                                    let path = match api::pick_save_file(&default).await {
+                                        Some(p) => p,
+                                        None => return,
+                                    };
+                                    match api::export_excel(&path, y).await {
+                                        Ok(res) => {
+                                            error.set(None);
+                                            web_sys::console::log_1(
+                                                &format!("Exporté {} lignes → {}", res.rows_written, res.path).into(),
+                                            );
+                                        }
+                                        Err(e) => error.set(Some(e)),
                                     }
-                                    Err(e) => error.set(Some(e)),
-                                }
-                            });
-                        })
-                    >
-                        {move || i18n.t("common.export")}
-                    </Button>
+                                });
+                            })
+                        >
+                            {move || i18n.t("common.export")}
+                        </Button>
+                    </Show>
                 </div>
             </div>
             </Show>
@@ -979,7 +989,7 @@ pub fn CotisationsPage() -> impl IntoView {
                     {move || format!("{} membre(s)", filtered_total.get())}
                 </p>
                 <div class="flex flex-wrap items-center gap-2">
-                    <Show when=move || !selected.get().is_empty()>
+                    <Show when=move || can_write.get() && !selected.get().is_empty()>
                         <Button
                             variant=ButtonVariant::Danger
                             on_click=Callback::new(move |_| {
@@ -1064,7 +1074,7 @@ pub fn CotisationsPage() -> impl IntoView {
                 <p class="shrink-0 text-[var(--brand-red)]">{move || error.get().unwrap_or_default()}</p>
             </Show>
 
-            <Show when=move || !pending_cells.get().is_empty() || cell_saving.get()>
+            <Show when=move || can_write.get() && (!pending_cells.get().is_empty() || cell_saving.get())>
                 <div class="sticky top-0 z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--brand)] bg-[var(--surface)] px-4 py-3 shadow-[var(--shadow)]">
                     <p class="text-sm font-medium">
                         {move || {
@@ -1187,35 +1197,37 @@ pub fn CotisationsPage() -> impl IntoView {
                                             >
                                                 "👁"
                                             </Button>
-                                            <Button
-                                                class="!min-h-8 !px-2 !py-1 text-sm"
-                                                on_click=Callback::new(move |_| {
-                                                    prefill_member.set(row_edit.member.id.clone());
-                                                    pay_open.set(true);
-                                                })
-                                            >
-                                                "✎"
-                                            </Button>
-                                            <Button
-                                                variant=ButtonVariant::Danger
-                                                class="!min-h-8 !px-2 !py-1 text-sm"
-                                                on_click=Callback::new(move |_| {
-                                                    let mid = row_clear.member.id.clone();
-                                                    let pid = current_period.get_untracked();
-                                                    if pid.is_empty() {
-                                                        error.set(Some("Sélectionnez un mois actuel.".into()));
-                                                        return;
-                                                    }
-                                                    spawn_local(async move {
-                                                        match api::clear_payment(&mid, &pid).await {
-                                                            Ok(_) => reload(),
-                                                            Err(e) => error.set(Some(e)),
+                                            <span class="flex flex-nowrap gap-1" class:hidden=move || !can_write.get()>
+                                                <Button
+                                                    class="!min-h-8 !px-2 !py-1 text-sm"
+                                                    on_click=Callback::new(move |_| {
+                                                        prefill_member.set(row_edit.member.id.clone());
+                                                        pay_open.set(true);
+                                                    })
+                                                >
+                                                    "✎"
+                                                </Button>
+                                                <Button
+                                                    variant=ButtonVariant::Danger
+                                                    class="!min-h-8 !px-2 !py-1 text-sm"
+                                                    on_click=Callback::new(move |_| {
+                                                        let mid = row_clear.member.id.clone();
+                                                        let pid = current_period.get_untracked();
+                                                        if pid.is_empty() {
+                                                            error.set(Some("Sélectionnez un mois actuel.".into()));
+                                                            return;
                                                         }
-                                                    });
-                                                })
-                                            >
-                                                "🗑"
-                                            </Button>
+                                                        spawn_local(async move {
+                                                            match api::clear_payment(&mid, &pid).await {
+                                                                Ok(_) => reload(),
+                                                                Err(e) => error.set(Some(e)),
+                                                            }
+                                                        });
+                                                    })
+                                                >
+                                                    "🗑"
+                                                </Button>
+                                            </span>
                                             <Button
                                                 variant=ButtonVariant::Secondary
                                                 class="!min-h-8 !px-2 !py-1 text-sm"
@@ -1518,6 +1530,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                     })
                                                     placeholder="0"
                                                     class=prior_cls
+                                                    readonly=Signal::derive(move || !can_write.get())
                                                 />
                                             </Td>
                                             {period_cells.into_iter().map(|(pid, amount_due, amount_paid)| {
@@ -1560,6 +1573,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                             })
                                                             placeholder="0"
                                                             class=due_cls
+                                                            readonly=Signal::derive(move || !can_write.get())
                                                         />
                                                     </Td>
                                                     <Td class=paid_cls>
@@ -1584,6 +1598,7 @@ pub fn CotisationsPage() -> impl IntoView {
                                                             })
                                                             placeholder="0"
                                                             class=paid_cls
+                                                            readonly=Signal::derive(move || !can_write.get())
                                                         />
                                                     </Td>
                                                 }
@@ -1602,35 +1617,37 @@ pub fn CotisationsPage() -> impl IntoView {
                                                     >
                                                         "👁"
                                                     </Button>
-                                                    <Button
-                                                        class="!min-h-8 !px-2 !py-1 text-sm"
-                                                        on_click=Callback::new(move |_| {
-                                                            prefill_member.set(row_edit.member.id.clone());
-                                                            pay_open.set(true);
-                                                        })
-                                                    >
-                                                        "✎"
-                                                    </Button>
-                                                    <Button
-                                                        variant=ButtonVariant::Danger
-                                                        class="!min-h-8 !px-2 !py-1 text-sm"
-                                                        on_click=Callback::new(move |_| {
-                                                            let mid = row_clear.member.id.clone();
-                                                            let pid = current_period.get_untracked();
-                                                            if pid.is_empty() {
-                                                                error.set(Some("Sélectionnez un mois actuel.".into()));
-                                                                return;
+                                            <span class="flex flex-nowrap gap-1" class:hidden=move || !can_write.get()>
+                                                <Button
+                                                    class="!min-h-8 !px-2 !py-1 text-sm"
+                                                    on_click=Callback::new(move |_| {
+                                                        prefill_member.set(row_edit.member.id.clone());
+                                                        pay_open.set(true);
+                                                    })
+                                                >
+                                                    "✎"
+                                                </Button>
+                                                <Button
+                                                    variant=ButtonVariant::Danger
+                                                    class="!min-h-8 !px-2 !py-1 text-sm"
+                                                    on_click=Callback::new(move |_| {
+                                                        let mid = row_clear.member.id.clone();
+                                                        let pid = current_period.get_untracked();
+                                                        if pid.is_empty() {
+                                                            error.set(Some("Sélectionnez un mois actuel.".into()));
+                                                            return;
+                                                        }
+                                                        spawn_local(async move {
+                                                            match api::clear_payment(&mid, &pid).await {
+                                                                Ok(_) => reload(),
+                                                                Err(e) => error.set(Some(e)),
                                                             }
-                                                            spawn_local(async move {
-                                                                match api::clear_payment(&mid, &pid).await {
-                                                                    Ok(_) => reload(),
-                                                                    Err(e) => error.set(Some(e)),
-                                                                }
-                                                            });
-                                                        })
-                                                    >
-                                                        "🗑"
-                                                    </Button>
+                                                        });
+                                                    })
+                                                >
+                                                    "🗑"
+                                                </Button>
+                                            </span>
                                                     <Button
                                                         variant=ButtonVariant::Secondary
                                                         class="!min-h-8 !px-2 !py-1 text-sm"
