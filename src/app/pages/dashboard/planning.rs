@@ -8,7 +8,7 @@ use crate::app::components::ui::{
     TableLoadMode, TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE,
     default_lazy_count, paginate_slice,
 };
-use crate::app::hooks::use_table_fullscreen;
+use crate::app::hooks::{use_auth, use_table_fullscreen};
 use crate::app::i18n::use_i18n;
 use crate::app::lib::{api, PlanningPeriod, UpsertPlanningInput};
 
@@ -39,6 +39,9 @@ fn month_options() -> Vec<SelectOption> {
 #[component]
 pub fn PlanningPage() -> impl IntoView {
     let i18n = use_i18n();
+    let auth = use_auth();
+    let can_read = auth.can_any(&["planning:read", "planning:write"]);
+    let can_write = auth.can("planning:write");
     let year = RwSignal::new(chrono::Local::now().year());
     let periods = RwSignal::new(Vec::<PlanningPeriod>::new());
     let error = RwSignal::new(Option::<String>::None);
@@ -81,7 +84,18 @@ pub fn PlanningPage() -> impl IntoView {
 
     Effect::new(move |_| {
         let _ = year.get();
-        reload();
+        if can_read.get() {
+            reload();
+        }
+    });
+
+    Effect::new(move |_| {
+        if !can_write.get() {
+            form_open.set(false);
+            edit_id.set(None);
+            selected.set(Vec::new());
+            pending.set(HashMap::new());
+        }
     });
 
     let filtered = Signal::derive(move || {
@@ -155,6 +169,17 @@ pub fn PlanningPage() -> impl IntoView {
 
     view! {
         <div class="flex min-h-0 flex-1 flex-col gap-4">
+            <Show when=move || !can_read.get()>
+                <div class="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                    <h1 class="font-display text-2xl font-semibold">{move || i18n.t("planning.title")}</h1>
+                    <p class="mt-2 text-[var(--muted)]">
+                        "Vous n'avez pas la permission de consulter le planning."
+                    </p>
+                </div>
+            </Show>
+
+            <Show when=move || can_read.get()>
+            <>
             <Show when=move || !fs.active.get()>
                 <div class="flex shrink-0 flex-wrap items-end justify-between gap-3">
                     <div>
@@ -162,13 +187,15 @@ pub fn PlanningPage() -> impl IntoView {
                         <p class="text-[var(--muted)]">{move || i18n.t("planning.subtitle")}</p>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        <Button on_click=Callback::new(move |_| {
-                            edit_id.set(None);
-                            form_open.update(|v| *v = !*v);
-                        })>
-                            {move || i18n.t("planning.add")}
-                        </Button>
-                        <Show when=move || !selected.get().is_empty()>
+                        <Show when=move || can_write.get()>
+                            <Button on_click=Callback::new(move |_| {
+                                edit_id.set(None);
+                                form_open.update(|v| *v = !*v);
+                            })>
+                                {move || i18n.t("planning.add")}
+                            </Button>
+                        </Show>
+                        <Show when=move || can_write.get() && !selected.get().is_empty()>
                             <Button
                                 variant=ButtonVariant::Danger
                                 on_click=Callback::new(move |_| {
@@ -305,7 +332,7 @@ pub fn PlanningPage() -> impl IntoView {
                 </Show>
             </div>
 
-            <Show when=move || form_open.get() || edit_id.get().is_some()>
+            <Show when=move || can_write.get() && (form_open.get() || edit_id.get().is_some())>
                 <div class="grid shrink-0 gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-2 lg:grid-cols-3">
                     <Select
                         label="Mois"
@@ -422,7 +449,7 @@ pub fn PlanningPage() -> impl IntoView {
 
             <Show when=move || view_mode.get() == "table">
                 <div class="flex min-h-0 flex-1 flex-col gap-4">
-                    <Show when=move || !pending.get().is_empty()>
+                    <Show when=move || can_write.get() && !pending.get().is_empty()>
                         <div class="sticky top-0 z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--brand)] bg-[var(--surface)] px-4 py-3 shadow-[var(--shadow)]">
                             <p class="text-sm font-medium">
                                 {move || {
@@ -518,6 +545,7 @@ pub fn PlanningPage() -> impl IntoView {
                                     <input
                                         type="checkbox"
                                         class="h-4 w-4"
+                                        class:hidden=move || !can_write.get()
                                         prop:checked=move || {
                                             let list = visible.get();
                                             let sel = selected.get();
@@ -555,7 +583,11 @@ pub fn PlanningPage() -> impl IntoView {
                                 <Th>"Date AG"</Th>
                                 <Th>"Début"</Th>
                                 <Th>"Fin"</Th>
-                                <Th>{move || i18n.t("common.actions")}</Th>
+                                <Th>
+                                    <span class:hidden=move || !can_write.get()>
+                                        {move || i18n.t("common.actions")}
+                                    </span>
+                                </Th>
                             </THead>
                             <TBody>
                                 <For
@@ -588,6 +620,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                     <input
                                                         type="checkbox"
                                                         class="h-4 w-4"
+                                                        class:hidden=move || !can_write.get()
                                                         prop:checked=move || {
                                                             selected.get().iter().any(|id| id == &pid_check)
                                                         }
@@ -621,6 +654,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                         on_commit=Callback::new(move |v| {
                                                             queue_edit(id_label.clone(), "label", v)
                                                         })
+                                                        readonly=Signal::derive(move || !can_write.get())
                                                     />
                                                 </Td>
                                                 <Td>
@@ -630,6 +664,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                             queue_edit(id_date.clone(), "meeting_date", v)
                                                         })
                                                         placeholder="AAAA-MM-JJ"
+                                                        readonly=Signal::derive(move || !can_write.get())
                                                     />
                                                 </Td>
                                                 <Td>
@@ -638,6 +673,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                         on_commit=Callback::new(move |v| {
                                                             queue_edit(id_start.clone(), "collect_start", v)
                                                         })
+                                                        readonly=Signal::derive(move || !can_write.get())
                                                     />
                                                 </Td>
                                                 <Td>
@@ -646,10 +682,11 @@ pub fn PlanningPage() -> impl IntoView {
                                                         on_commit=Callback::new(move |v| {
                                                             queue_edit(id_end.clone(), "collect_end", v)
                                                         })
+                                                        readonly=Signal::derive(move || !can_write.get())
                                                     />
                                                 </Td>
                                                 <Td>
-                                                    <div class="flex flex-wrap gap-2">
+                                                    <div class="flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
                                                         <Button
                                                             variant=ButtonVariant::Secondary
                                                             on_click=Callback::new(move |_| {
@@ -734,6 +771,8 @@ pub fn PlanningPage() -> impl IntoView {
                 <div class="min-h-0 flex-1 overflow-auto">
                     <PlanningCalendar year=year.into() periods=filtered />
                 </div>
+            </Show>
+            </>
             </Show>
         </div>
     }

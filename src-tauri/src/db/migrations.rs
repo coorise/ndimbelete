@@ -277,6 +277,12 @@ fn ensure_role_permission_keys(conn: &Connection) -> Result<()> {
             push_keys(&mut perms, "collab:push", &mut changed);
             push_keys(&mut perms, "collab:manage", &mut changed);
         }
+        // Operational writers (members/cotisations) get planning read/write.
+        // Président-style read-only roles are left without planning unless granted explicitly.
+        if perms.iter().any(|p| p == "members:write" || p == "cotisations:write") {
+            push_keys(&mut perms, "planning:read", &mut changed);
+            push_keys(&mut perms, "planning:write", &mut changed);
+        }
         // Trésorier / Adjoint historically could push when ACL was empty.
         if name_l.contains("trésorier")
             || name_l.contains("tresorier")
@@ -455,7 +461,7 @@ fn seed_roles(conn: &Connection) -> Result<()> {
         ("Commissaire aux comptes", r#"["*"]"#),
         (
             "Trésorier",
-            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read","excel:import","excel:export","settings:read","settings:write","roles:read","roles:write","collab:push","collab:manage"]"#,
+            r#"["members:read","members:write","cotisations:read","cotisations:write","planning:read","planning:write","analytics:read","excel:import","excel:export","settings:read","settings:write","roles:read","roles:write","collab:push","collab:manage"]"#,
         ),
         (
             "Président",
@@ -463,7 +469,7 @@ fn seed_roles(conn: &Connection) -> Result<()> {
         ),
         (
             "Adjoint",
-            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read","collab:push"]"#,
+            r#"["members:read","members:write","cotisations:read","cotisations:write","planning:read","planning:write","analytics:read","collab:push"]"#,
         ),
         (
             "Staff",
