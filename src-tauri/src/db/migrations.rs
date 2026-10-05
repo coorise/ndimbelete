@@ -232,6 +232,72 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         seed_year(conn, 2026)?;
     }
 
+    // Additive permission keys for existing role rows (idempotent).
+    ensure_role_permission_keys(conn)?;
+
+    Ok(())
+}
+
+/// Append missing modern permission keys to existing roles without wiping customizations.
+fn ensure_role_permission_keys(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT id, name, permissions_json FROM roles")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    for (id, name, raw) in rows {
+        let mut perms: Vec<String> = if let Ok(v) = serde_json::from_str(&raw) {
+            v
+        } else {
+            continue;
+        };
+        if perms.iter().any(|p| p == "*") {
+            continue;
+        }
+        let name_l = name.to_lowercase();
+        let mut changed = false;
+        let push_keys = |perms: &mut Vec<String>, key: &str, changed: &mut bool| {
+            if !perms.iter().any(|p| p == key) {
+                perms.push(key.to_string());
+                *changed = true;
+            }
+        };
+
+        // Writers who already manage staff/settings get roles + collab push/manage.
+        if perms.iter().any(|p| p == "staff:write") {
+            push_keys(&mut perms, "roles:read", &mut changed);
+            push_keys(&mut perms, "roles:write", &mut changed);
+            push_keys(&mut perms, "collab:push", &mut changed);
+            push_keys(&mut perms, "collab:manage", &mut changed);
+        }
+        if perms.iter().any(|p| p == "settings:write") {
+            push_keys(&mut perms, "collab:push", &mut changed);
+            push_keys(&mut perms, "collab:manage", &mut changed);
+        }
+        // Trésorier / Adjoint historically could push when ACL was empty.
+        if name_l.contains("trésorier")
+            || name_l.contains("tresorier")
+            || name_l.contains("adjoint")
+        {
+            push_keys(&mut perms, "collab:push", &mut changed);
+        }
+        // Align Président seed: drop write if name matches and only keep lecture-style (do NOT
+        // strip custom writes the admin may have added — only add excel:export if missing).
+        if name_l.contains("président") || name_l.contains("president") {
+            push_keys(&mut perms, "excel:export", &mut changed);
+        }
+
+        if changed {
+            let json = serde_json::to_string(&perms)?;
+            conn.execute(
+                "UPDATE roles SET permissions_json = ?1 WHERE id = ?2",
+                rusqlite::params![json, id],
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -389,15 +455,15 @@ fn seed_roles(conn: &Connection) -> Result<()> {
         ("Commissaire aux comptes", r#"["*"]"#),
         (
             "Trésorier",
-            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read","excel:import","excel:export","settings:read"]"#,
+            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read","excel:import","excel:export","settings:read","settings:write","roles:read","roles:write","collab:push","collab:manage"]"#,
         ),
         (
             "Président",
-            r#"["members:read","members:write","cotisations:read","analytics:read","settings:read","staff:read"]"#,
+            r#"["members:read","cotisations:read","analytics:read","excel:export","staff:read"]"#,
         ),
         (
             "Adjoint",
-            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read"]"#,
+            r#"["members:read","members:write","cotisations:read","cotisations:write","analytics:read","collab:push"]"#,
         ),
         (
             "Staff",

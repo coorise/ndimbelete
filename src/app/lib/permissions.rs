@@ -1,6 +1,6 @@
-//! Canonical staff permission keys shown in the roles UI.
+//! Canonical staff permission keys and RBAC helpers.
 
-/// (key, French label)
+/// (key, French label) — shown in the staff Roles editor.
 pub const PERMISSION_OPTIONS: &[(&str, &str)] = &[
     ("*", "Toutes les permissions"),
     ("members:read", "Membres — lecture"),
@@ -11,8 +11,13 @@ pub const PERMISSION_OPTIONS: &[(&str, &str)] = &[
     ("excel:import", "Excel — import"),
     ("excel:export", "Excel — export"),
     ("settings:read", "Paramètres — lecture"),
+    ("settings:write", "Paramètres — écriture"),
     ("staff:read", "Personnel — lecture"),
     ("staff:write", "Personnel — écriture"),
+    ("roles:read", "Rôles — lecture"),
+    ("roles:write", "Rôles — écriture"),
+    ("collab:push", "Collaboration — envoyer"),
+    ("collab:manage", "Collaboration — paramètres"),
 ];
 
 /// Association member-role permissions (Excel VIREMENT BANQUAIRE split).
@@ -58,4 +63,57 @@ pub fn member_permission_label(key: &str) -> String {
         .find(|(k, _)| *k == key)
         .map(|(_, l)| (*l).to_string())
         .unwrap_or_else(|| key.to_string())
+}
+
+pub fn permission_label(key: &str) -> String {
+    PERMISSION_OPTIONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, l)| (*l).to_string())
+        .unwrap_or_else(|| key.to_string())
+}
+
+/// `true` when `perms` grants `need`.
+/// - `*` grants everything
+/// - `resource:write` also grants `resource:read`
+pub fn permissions_allow(perms: &[String], need: &str) -> bool {
+    if need.is_empty() {
+        return true;
+    }
+    if perms.iter().any(|p| p == "*") {
+        return true;
+    }
+    if perms.iter().any(|p| p == need) {
+        return true;
+    }
+    if let Some(resource) = need.strip_suffix(":read") {
+        let write = format!("{resource}:write");
+        if perms.iter().any(|p| p == &write) {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn permissions_allow_any(perms: &[String], needs: &[&str]) -> bool {
+    needs.iter().any(|n| permissions_allow(perms, n))
+}
+
+/// Whether the user may open a nav route (read OR write for that area).
+pub fn can_see_nav(perms: &[String], href: &str) -> bool {
+    match href {
+        "/app" => permissions_allow_any(perms, &["analytics:read", "cotisations:read", "members:read"]),
+        "/app/staff" => {
+            permissions_allow_any(perms, &["staff:read", "staff:write", "roles:read", "roles:write"])
+        }
+        "/app/planning" => true, // planning is operational for all logged-in staff
+        "/app/members" => permissions_allow_any(perms, &["members:read", "members:write"]),
+        "/app/cotisations" => {
+            permissions_allow_any(perms, &["cotisations:read", "cotisations:write"])
+        }
+        "/app/profile" => true,
+        "/app/settings" => permissions_allow_any(perms, &["settings:read", "settings:write"]),
+        "/app/collaboration" => true, // connect/sync available to all; push gated separately
+        _ => true,
+    }
 }

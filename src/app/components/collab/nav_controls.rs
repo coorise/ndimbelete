@@ -28,6 +28,12 @@ pub fn CollabNavControls() -> impl IntoView {
     let busy = RwSignal::new(false);
     let error = RwSignal::new(Option::<String>::None);
     let remote_alert = RwSignal::new(Option::<String>::None);
+    let can_push_action = Signal::derive(move || {
+        auth.is_founder().get()
+            || auth
+                .can_any(&["collab:push", "collab:manage", "*"])
+                .get()
+    });
 
     Effect::new(move |_| {
         spawn_local(async move {
@@ -174,7 +180,10 @@ pub fn CollabNavControls() -> impl IntoView {
             </Show>
 
             <Show when=move || status.get().map(|s| s.connected).unwrap_or(false)>
-                <Show when=move || status.get().map(|s| s.can_push).unwrap_or(true)>
+                <Show when=move || {
+                    can_push_action.get()
+                        && status.get().map(|s| s.can_push).unwrap_or(false)
+                }>
                     <button
                         type="button"
                         class=move || {

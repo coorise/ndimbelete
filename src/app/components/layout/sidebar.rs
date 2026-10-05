@@ -2,8 +2,9 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
 
+use crate::app::hooks::use_auth;
 use crate::app::i18n::use_i18n;
-use crate::app::lib::cn;
+use crate::app::lib::{can_see_nav, cn};
 
 #[derive(Clone, Copy)]
 struct NavItem {
@@ -65,6 +66,20 @@ pub fn Sidebar(
 ) -> impl IntoView {
     let location = use_location();
     let i18n = use_i18n();
+    let auth = use_auth();
+
+    let visible_items = Signal::derive(move || {
+        let perms = auth
+            .session
+            .get()
+            .map(|s| s.permissions)
+            .unwrap_or_default();
+        ITEMS
+            .iter()
+            .copied()
+            .filter(|item| can_see_nav(&perms, item.href))
+            .collect::<Vec<_>>()
+    });
 
     view! {
         <aside class=move || {
@@ -135,10 +150,10 @@ pub fn Sidebar(
                 </p>
             </div>
             <nav class="flex min-h-0 flex-1 flex-col gap-2" aria-label=move || i18n.t("nav.navigation")>
-                {ITEMS
-                    .iter()
-                    .copied()
-                    .map(|item| {
+                <For
+                    each=move || visible_items.get()
+                    key=|item| item.href
+                    children=move |item| {
                         let href = item.href;
                         let badge = item.badge;
                         let label_key = item.label_key;
@@ -184,8 +199,8 @@ pub fn Sidebar(
                                 </span>
                             </A>
                         }
-                    })
-                    .collect_view()}
+                    }
+                />
             </nav>
 
             <div class="mt-3 shrink-0 border-t border-[var(--border)] pt-3">
