@@ -57,6 +57,9 @@ pub fn run() {
             commands::create_staff,
             commands::update_staff,
             commands::deactivate_staff,
+            commands::activate_staff,
+            commands::delete_staff,
+            commands::delete_staffs,
             // Roles
             commands::list_roles,
             commands::create_role,

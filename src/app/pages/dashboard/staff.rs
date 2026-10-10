@@ -3,7 +3,7 @@ use leptos::task::spawn_local;
 use std::collections::HashMap;
 
 use crate::app::components::ui::{
-    Badge, Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, Select, SelectOption,
+    Badge, Button, ButtonVariant, ConfirmModal, EditableCell, Input, LazyScrollRegion, Modal, Select, SelectOption,
     TabItem, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td, Th,
     THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
 };
@@ -186,6 +186,8 @@ fn StaffTab(
     let lazy_count = RwSignal::new(25usize);
     let pending = RwSignal::new(HashMap::<String, String>::new());
     let fs = use_table_fullscreen();
+    let delete_confirm = RwSignal::new(Option::<(String, String)>::None);
+    let batch_delete_confirm = RwSignal::new(false);
 
     let filtered = Signal::derive(move || {
         let q = search.get().trim().to_lowercase();
@@ -361,7 +363,7 @@ fn StaffTab(
                 </Show>
                 <Show when=move || can_write.get() && !selected.get().is_empty()>
                     <Button
-                        variant=ButtonVariant::Danger
+                        variant=ButtonVariant::Secondary
                         on_click=Callback::new(move |_| {
                             let ids = selected.get_untracked();
                             let list = staff.get_untracked();
@@ -378,6 +380,14 @@ fn StaffTab(
                         })
                     >
                         {move || format!("Désactiver ({})", selected.get().len())}
+                    </Button>
+                    <Button
+                        variant=ButtonVariant::Danger
+                        on_click=Callback::new(move |_| {
+                            batch_delete_confirm.set(true);
+                        })
+                    >
+                        {move || format!("Supprimer ({})", selected.get().len())}
                     </Button>
                 </Show>
                 </div>
@@ -477,49 +487,71 @@ fn StaffTab(
                                 let username_v = s.username.clone();
                                 let role_v = s.role_name.clone().unwrap_or_default();
                                 let is_active = s.is_active;
-                                let deactivate_btn = (!s.is_founder).then(|| {
+                                let toggle_active_btn = (!s.is_founder).then(|| {
                                     let id = id.clone();
                                     view! {
                                         <Button
-                                            variant=ButtonVariant::Danger
+                                            variant=if is_active { ButtonVariant::Secondary } else { ButtonVariant::Primary }
                                             on_click=Callback::new(move |_| {
                                                 let id = id.clone();
                                                 spawn_local(async move {
-                                                    let _ = api::deactivate_staff(&id).await;
+                                                    let res = if is_active {
+                                                        api::deactivate_staff(&id).await
+                                                    } else {
+                                                        api::activate_staff(&id).await
+                                                    };
+                                                    if let Err(e) = res {
+                                                        form_error.set(Some(e));
+                                                    }
                                                     on_change.run(());
                                                 });
                                             })
                                         >
-                                            "Désactiver"
+                                            {if is_active { "Désactiver" } else { "Activer" }}
+                                        </Button>
+                                    }
+                                });
+                                let delete_btn = (!s.is_founder).then(|| {
+                                    let id = id.clone();
+                                    let name = name.clone();
+                                    view! {
+                                        <Button
+                                            variant=ButtonVariant::Danger
+                                            on_click=Callback::new(move |_| {
+                                                delete_confirm.set(Some((id.clone(), name.clone())));
+                                            })
+                                        >
+                                            "Supprimer"
                                         </Button>
                                     }
                                 });
                                 view! {
                                     <div class="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow)]">
                                         <div class="flex items-start justify-between gap-2">
-                                            <div>
-                                                <p class="font-display text-lg font-semibold text-[var(--brand)]">{name}</p>
-                                                <p class="text-xs text-[var(--muted)]">{username_v}</p>
-                                            </div>
-                                            <Badge tone=if is_active { "green" } else { "muted" }>
-                                                {if is_active { "Actif" } else { "Inactif" }}
-                                            </Badge>
-                                        </div>
-                                        <p class="mt-3 text-sm">
-                                            <span class="text-[var(--muted)]">"Rôle : "</span>
-                                            {role_v}
-                                        </p>
-                                        <div class="mt-4 flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
-                                            <Button
-                                                variant=ButtonVariant::Secondary
-                                                on_click=Callback::new(move |_| open_edit(s_edit.clone()))
-                                            >
-                                                "Modifier"
-                                            </Button>
-                                            {deactivate_btn}
-                                        </div>
-                                    </div>
-                                }
+                                             <div>
+                                                 <p class="font-display text-lg font-semibold text-[var(--brand)]">{name}</p>
+                                                 <p class="text-xs text-[var(--muted)]">{username_v}</p>
+                                             </div>
+                                             <Badge tone=if is_active { "green" } else { "muted" }>
+                                                 {if is_active { "Actif" } else { "Inactif" }}
+                                             </Badge>
+                                         </div>
+                                         <p class="mt-3 text-sm">
+                                             <span class="text-[var(--muted)]">"Rôle : "</span>
+                                             {role_v}
+                                         </p>
+                                         <div class="mt-4 flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
+                                             <Button
+                                                 variant=ButtonVariant::Secondary
+                                                 on_click=Callback::new(move |_| open_edit(s_edit.clone()))
+                                             >
+                                                 "Modifier"
+                                             </Button>
+                                             {toggle_active_btn}
+                                             {delete_btn}
+                                         </div>
+                                     </div>
+                                 }
                             }
                         />
                     </LazyScrollRegion>
@@ -591,20 +623,42 @@ fn StaffTab(
                                     let last_base = s.last_name.clone();
                                     let first_base = s.first_name.clone();
                                     let user_base = s.username.clone();
-                                    let deactivate_btn = (!s.is_founder).then(|| {
+                                    let is_active = s.is_active;
+                                    let toggle_active_btn = (!s.is_founder).then(|| {
                                         let id = s.id.clone();
                                         view! {
                                             <Button
-                                                variant=ButtonVariant::Danger
+                                                variant=if is_active { ButtonVariant::Secondary } else { ButtonVariant::Primary }
                                                 on_click=Callback::new(move |_| {
                                                     let id = id.clone();
                                                     spawn_local(async move {
-                                                        let _ = api::deactivate_staff(&id).await;
+                                                        let res = if is_active {
+                                                            api::deactivate_staff(&id).await
+                                                        } else {
+                                                            api::activate_staff(&id).await
+                                                        };
+                                                        if let Err(e) = res {
+                                                            form_error.set(Some(e));
+                                                        }
                                                         on_change.run(());
                                                     });
                                                 })
                                             >
-                                                "Désactiver"
+                                                {if is_active { "Désactiver" } else { "Activer" }}
+                                            </Button>
+                                        }
+                                    });
+                                    let delete_btn = (!s.is_founder).then(|| {
+                                        let id = s.id.clone();
+                                        let name = staff_display_name(&s);
+                                        view! {
+                                            <Button
+                                                variant=ButtonVariant::Danger
+                                                on_click=Callback::new(move |_| {
+                                                    delete_confirm.set(Some((id.clone(), name.clone())));
+                                                })
+                                            >
+                                                "Supprimer"
                                             </Button>
                                         }
                                     });
@@ -670,7 +724,8 @@ fn StaffTab(
                                                     >
                                                         "Modifier"
                                                     </Button>
-                                                    {deactivate_btn}
+                                                    {toggle_active_btn}
+                                                    {delete_btn}
                                                 </div>
                                             </Td>
                                         </Tr>
@@ -768,6 +823,60 @@ fn StaffTab(
                     </Button>
                 </div>
             </Modal>
+
+            <ConfirmModal
+                open=Signal::derive(move || delete_confirm.get().is_some())
+                title="Supprimer le personnel"
+                message=Signal::derive(move || {
+                    if let Some((_, name)) = delete_confirm.get() {
+                        format!("Êtes-vous sûr de vouloir supprimer le compte du personnel « {name} » ? Cette action est irréversible.")
+                    } else {
+                        String::new()
+                    }
+                })
+                confirm_label="Supprimer"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| delete_confirm.set(None))
+                on_confirm=Callback::new(move |_| {
+                    if let Some((id, _)) = delete_confirm.get_untracked() {
+                        spawn_local(async move {
+                            if let Err(e) = api::delete_staff(&id).await {
+                                form_error.set(Some(e));
+                            }
+                            delete_confirm.set(None);
+                            on_change.run(());
+                        });
+                    }
+                })
+            />
+
+            <ConfirmModal
+                open=batch_delete_confirm.into()
+                title="Supprimer le personnel sélectionné"
+                message=Signal::derive(move || {
+                    let count = selected.get().len();
+                    format!("Êtes-vous sûr de vouloir supprimer les {count} membre(s) du personnel sélectionné(s) ? Les comptes fondateurs seront conservés. Cette action est irréversible.")
+                })
+                confirm_label="Supprimer tout"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| batch_delete_confirm.set(false))
+                on_confirm=Callback::new(move |_| {
+                    let ids = selected.get_untracked();
+                    spawn_local(async move {
+                        match api::delete_staffs(ids).await {
+                            Ok(_) => {
+                                selected.set(Vec::new());
+                                batch_delete_confirm.set(false);
+                                on_change.run(());
+                            }
+                            Err(e) => {
+                                form_error.set(Some(e));
+                                batch_delete_confirm.set(false);
+                            }
+                        }
+                    });
+                })
+            />
         </div>
     }
 }

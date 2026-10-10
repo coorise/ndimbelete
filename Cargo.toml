@@ -37,6 +37,17 @@ web-sys = { version = "0.3", features = [
 [workspace]
 members = ["src-tauri"]
 
+# Dev profile: fast compilation, low disk footprint, line-table backtraces only
+[profile.dev]
+opt-level = 0
+debug = 1
+split-debuginfo = "unpacked"
+
+# Optimize all dependencies in dev mode for fast runtime and minimal cache bloat
+[profile.dev.package."*"]
+opt-level = 2
+debug = 0
+
 # Release optimizations for the desktop binary (Tauri).
 [profile.release]
 codegen-units = 1

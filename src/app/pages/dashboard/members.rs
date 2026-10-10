@@ -3,7 +3,7 @@ use leptos::task::spawn_local;
 use std::collections::HashMap;
 
 use crate::app::components::ui::{
-    Badge, Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, Select, SelectOption,
+    Badge, Button, ButtonVariant, ConfirmModal, EditableCell, Input, LazyScrollRegion, Modal, Select, SelectOption,
     TabItem, Table, TableFullscreenToggle, TableLoadMode, TablePaginationBar, Tabs, TBody, Td,
     TextArea, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count, paginate_slice,
 };
@@ -213,6 +213,8 @@ fn MembersList(
     let lazy_count = RwSignal::new(25usize);
     let pending = RwSignal::new(HashMap::<String, String>::new());
     let fs = use_table_fullscreen();
+    let delete_confirm = RwSignal::new(Option::<(String, String)>::None);
+    let batch_delete_confirm = RwSignal::new(false);
 
     let reload = move || {
         let q = query.get_untracked();
@@ -420,16 +422,7 @@ fn MembersList(
                         <Button
                             variant=ButtonVariant::Danger
                             on_click=Callback::new(move |_| {
-                                let ids = selected.get_untracked();
-                                spawn_local(async move {
-                                    match api::delete_members(ids).await {
-                                        Ok(_) => {
-                                            selected.set(Vec::new());
-                                            reload();
-                                        }
-                                        Err(e) => error.set(Some(e)),
-                                    }
-                                });
+                                batch_delete_confirm.set(true);
                             })
                         >
                             {move || format!("Supprimer ({})", selected.get().len())}
@@ -570,9 +563,10 @@ fn MembersList(
                             each=move || visible.get()
                             key=|m| m.id.clone()
                             children=move |m| {
-                                let m2 = m.clone();
-                                let last = m.last_name.clone();
-                                let first = m.first_name.clone();
+                                let edit_m = m.clone();
+                                let del_id = m.id.clone();
+                                let del_label = format!("{} {} ({})", m.last_name, m.first_name, m.card_number);
+                                let full_name = format!("{} {}", m.last_name, m.first_name);
                                 let card = m.card_number.clone();
                                 let status_v = m.status.clone();
                                 let role_name = m.member_role_name.clone().unwrap_or_default();
@@ -582,7 +576,7 @@ fn MembersList(
                                         <div class="flex items-start justify-between gap-2">
                                             <div>
                                                 <p class="font-display text-lg font-semibold text-[var(--brand)]">
-                                                    {format!("{last} {first}")}
+                                                    {full_name}
                                                 </p>
                                                 <p class="text-xs text-[var(--muted)]">{card}</p>
                                             </div>
@@ -591,7 +585,7 @@ fn MembersList(
                                                 "demissionnaire" => "yellow",
                                                 _ => "green",
                                             }>
-                                                {status_v.clone()}
+                                                {status_v}
                                             </Badge>
                                         </div>
                                         <p class="mt-2 text-sm">
@@ -602,17 +596,25 @@ fn MembersList(
                                             <span class="text-[var(--muted)]">"Paiement : "</span>
                                             {pm}
                                         </p>
-                                        <div class="mt-4" class:hidden=move || !can_write.get()>
-                                                <Button
-                                                    variant=ButtonVariant::Secondary
-                                                    on_click=Callback::new(move |_| {
-                                                        editing.set(Some(m2.clone()));
-                                                        fill_form(&m2);
-                                                        open.set(true);
-                                                    })
-                                                >
-                                                    "Modifier"
-                                                </Button>
+                                        <div class="mt-4 flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
+                                            <Button
+                                                variant=ButtonVariant::Secondary
+                                                on_click=Callback::new(move |_| {
+                                                    editing.set(Some(edit_m.clone()));
+                                                    fill_form(&edit_m);
+                                                    open.set(true);
+                                                })
+                                            >
+                                                "Modifier"
+                                            </Button>
+                                            <Button
+                                                variant=ButtonVariant::Danger
+                                                on_click=Callback::new(move |_| {
+                                                    delete_confirm.set(Some((del_id.clone(), del_label.clone())));
+                                                })
+                                            >
+                                                "Supprimer"
+                                            </Button>
                                         </div>
                                     </div>
                                 }
@@ -681,7 +683,9 @@ fn MembersList(
                                 each=move || visible.get()
                                 key=|m| m.id.clone()
                                 children=move |m| {
-                                    let m2 = m.clone();
+                                    let edit_m = m.clone();
+                                    let del_id = m.id.clone();
+                                    let del_label = format!("{} {} ({})", m.first_name, m.last_name, m.card_number);
                                     let mid = m.id.clone();
                                     let mid_check = m.id.clone();
                                     let id_card = m.id.clone();
@@ -786,16 +790,24 @@ fn MembersList(
                                                 </Badge>
                                             </Td>
                                             <Td>
-                                                <div class:hidden=move || !can_write.get()>
+                                                <div class="flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
                                                     <Button
                                                         variant=ButtonVariant::Secondary
                                                         on_click=Callback::new(move |_| {
-                                                            editing.set(Some(m2.clone()));
-                                                            fill_form(&m2);
+                                                            editing.set(Some(edit_m.clone()));
+                                                            fill_form(&edit_m);
                                                             open.set(true);
                                                         })
                                                     >
                                                         "Modifier"
+                                                    </Button>
+                                                    <Button
+                                                        variant=ButtonVariant::Danger
+                                                        on_click=Callback::new(move |_| {
+                                                            delete_confirm.set(Some((del_id.clone(), del_label.clone())));
+                                                        })
+                                                    >
+                                                        "Supprimer"
                                                     </Button>
                                                 </div>
                                             </Td>
@@ -935,6 +947,60 @@ fn MembersList(
                     </Button>
                 </div>
             </Modal>
+
+            <ConfirmModal
+                open=Signal::derive(move || delete_confirm.get().is_some())
+                title="Supprimer le membre"
+                message=Signal::derive(move || {
+                    if let Some((_, label)) = delete_confirm.get() {
+                        format!("Êtes-vous sûr de vouloir supprimer le membre « {label} » ? Cette action est irréversible.")
+                    } else {
+                        String::new()
+                    }
+                })
+                confirm_label="Supprimer"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| delete_confirm.set(None))
+                on_confirm=Callback::new(move |_| {
+                    if let Some((id, _)) = delete_confirm.get_untracked() {
+                        spawn_local(async move {
+                            if let Err(e) = api::delete_member(&id).await {
+                                error.set(Some(e));
+                            }
+                            delete_confirm.set(None);
+                            reload();
+                        });
+                    }
+                })
+            />
+
+            <ConfirmModal
+                open=batch_delete_confirm.into()
+                title="Supprimer les membres sélectionnés"
+                message=Signal::derive(move || {
+                    let count = selected.get().len();
+                    format!("Êtes-vous sûr de vouloir supprimer les {count} membre(s) sélectionné(s) ? Cette action est irréversible.")
+                })
+                confirm_label="Supprimer tout"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| batch_delete_confirm.set(false))
+                on_confirm=Callback::new(move |_| {
+                    let ids = selected.get_untracked();
+                    spawn_local(async move {
+                        match api::delete_members(ids).await {
+                            Ok(_) => {
+                                selected.set(Vec::new());
+                                batch_delete_confirm.set(false);
+                                reload();
+                            }
+                            Err(e) => {
+                                error.set(Some(e));
+                                batch_delete_confirm.set(false);
+                            }
+                        }
+                    });
+                })
+            />
         </div>
     }
 }

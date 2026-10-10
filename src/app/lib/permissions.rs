@@ -67,6 +67,7 @@ pub fn member_permission_label(key: &str) -> String {
         .unwrap_or_else(|| key.to_string())
 }
 
+#[allow(dead_code)]
 pub fn permission_label(key: &str) -> String {
     PERMISSION_OPTIONS
         .iter()

@@ -58,7 +58,7 @@ pub fn OverviewPage() -> impl IntoView {
     let intuitive = Signal::derive(move || is_intuitive_sign(&debt_sign.get()));
     // Cohort filter: "", "paid", "unfulfilled", "debt", "surplus"
     let status_filter = RwSignal::new(String::new());
-    /// Empty = whole year; otherwise planning period months (1–12) as strings.
+    // Empty = whole year; otherwise planning period months (1–12) as strings.
     let period_months = RwSignal::new(Vec::<String>::new());
     let planning = RwSignal::new(Vec::<PlanningPeriod>::new());
 

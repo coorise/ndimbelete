@@ -500,6 +500,7 @@ pub struct OverviewStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[allow(dead_code)]
 pub struct OverviewMemberRow {
     pub id: String,
     pub last_name: String,
