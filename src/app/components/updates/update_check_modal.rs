@@ -75,7 +75,7 @@ pub fn UpdateCheckModal(
                                 </dl>
                                 <Show when=move || available>
                                     <p class="text-xs text-[var(--muted)]">
-                                        "L’installateur remplacera l’application installée, puis le fichier d’installation sera supprimé."
+                                        "L’application sera fermée pour appliquer la mise à jour, puis redémarrera automatiquement."
                                     </p>
                                 </Show>
                             </div>

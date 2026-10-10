@@ -225,11 +225,28 @@ pub fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> 
         .ok_or_else(|| "Chemin installateur invalide.".to_string())?
         .replace('\'', "''");
 
-    // Wait for silent install, then delete the setup to free disk space.
+    let current_exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.replace('\'', "''")));
+
+    let install_cmd = if path_str.to_lowercase().ends_with(".msi") {
+        format!("Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', '\"{path_str}\"', '/qn', '/norestart' -Wait")
+    } else {
+        format!("Start-Process -FilePath '{path_str}' -ArgumentList '/S' -Wait")
+    };
+
+    let relaunch_cmd = match &current_exe {
+        Some(exe) => format!(
+            "; Start-Sleep -Seconds 1; if (Test-Path -LiteralPath '{exe}') {{ Start-Process -FilePath '{exe}' }}"
+        ),
+        None => String::new(),
+    };
+
+    // Wait for silent install, delete the setup, and auto relaunch the updated application.
     let ps = format!(
-        "Start-Process -FilePath '{path_str}' -ArgumentList '/S' -Wait; \
+        "{install_cmd}; \
          Start-Sleep -Seconds 2; \
-         Remove-Item -LiteralPath '{path_str}' -Force -ErrorAction SilentlyContinue"
+         Remove-Item -LiteralPath '{path_str}' -Force -ErrorAction SilentlyContinue{relaunch_cmd}"
     );
 
     Command::new("powershell")
