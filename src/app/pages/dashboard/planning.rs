@@ -4,7 +4,7 @@ use leptos::task::spawn_local;
 use std::collections::HashMap;
 
 use crate::app::components::ui::{
-    Button, ButtonVariant, EditableCell, Input, Select, SelectOption, Table, TableFullscreenToggle,
+    Button, ButtonVariant, ConfirmModal, EditableCell, Input, Select, SelectOption, Table, TableFullscreenToggle,
     TableLoadMode, TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE,
     default_lazy_count, paginate_slice,
 };
@@ -66,6 +66,8 @@ pub fn PlanningPage() -> impl IntoView {
     let form_color = RwSignal::new("#007A3E".to_string());
     let selected = RwSignal::new(Vec::<String>::new());
     let pending = RwSignal::new(HashMap::<String, String>::new());
+    let delete_confirm = RwSignal::new(Option::<(String, String)>::None);
+    let batch_delete_confirm = RwSignal::new(false);
 
     let reload = move || {
         let y = year.get_untracked();
@@ -199,14 +201,7 @@ pub fn PlanningPage() -> impl IntoView {
                             <Button
                                 variant=ButtonVariant::Danger
                                 on_click=Callback::new(move |_| {
-                                    let ids = selected.get_untracked();
-                                    spawn_local(async move {
-                                        for id in ids {
-                                            let _ = api::delete_planning_period(&id, true).await;
-                                        }
-                                        selected.set(Vec::new());
-                                        reload();
-                                    });
+                                    batch_delete_confirm.set(true);
                                 })
                             >
                                 {move || format!("Supprimer ({})", selected.get().len())}
@@ -594,10 +589,11 @@ pub fn PlanningPage() -> impl IntoView {
                                     each=move || visible.get()
                                     key=|p| p.id.clone()
                                     children=move |p| {
-                                        let pid = p.id.clone();
                                         let pid_check = p.id.clone();
                                         let pid_sel = p.id.clone();
                                         let pid_edit = p.id.clone();
+                                        let p_del_id = p.id.clone();
+                                        let p_del_label = p.label.clone();
                                         let p_edit = p.clone();
                                         let id_label = p.id.clone();
                                         let id_date = p.id.clone();
@@ -722,25 +718,7 @@ pub fn PlanningPage() -> impl IntoView {
                                                         <Button
                                                             variant=ButtonVariant::Danger
                                                             on_click=Callback::new(move |_| {
-                                                                let id = pid.clone();
-                                                                spawn_local(async move {
-                                                                    match api::delete_planning_period(&id, false).await {
-                                                                        Ok(()) => reload(),
-                                                                        Err(e) => {
-                                                                            if e.contains("force") || e.contains("paiement") {
-                                                                                if let Ok(()) =
-                                                                                    api::delete_planning_period(&id, true).await
-                                                                                {
-                                                                                    reload();
-                                                                                } else {
-                                                                                    error.set(Some(e));
-                                                                                }
-                                                                            } else {
-                                                                                error.set(Some(e));
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                });
+                                                                delete_confirm.set(Some((p_del_id.clone(), p_del_label.clone())));
                                                             })
                                                         >
                                                             {move || i18n.t("common.delete")}
@@ -772,6 +750,69 @@ pub fn PlanningPage() -> impl IntoView {
                     <PlanningCalendar year=year.into() periods=filtered />
                 </div>
             </Show>
+
+            <ConfirmModal
+                open=Signal::derive(move || delete_confirm.get().is_some())
+                title="Supprimer la période"
+                message=Signal::derive(move || {
+                    if let Some((_, label)) = delete_confirm.get() {
+                        format!("Êtes-vous sûr de vouloir supprimer la période « {label} » ?")
+                    } else {
+                        String::new()
+                    }
+                })
+                confirm_label="Supprimer"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| delete_confirm.set(None))
+                on_confirm=Callback::new(move |_| {
+                    if let Some((id, _)) = delete_confirm.get_untracked() {
+                        spawn_local(async move {
+                            match api::delete_planning_period(&id, false).await {
+                                Ok(()) => reload(),
+                                Err(e) => {
+                                    if e.contains("force") || e.contains("paiement") {
+                                        if let Ok(()) = api::delete_planning_period(&id, true).await {
+                                            reload();
+                                        } else {
+                                            error.set(Some(e));
+                                        }
+                                    } else {
+                                        error.set(Some(e));
+                                    }
+                                }
+                            }
+                            delete_confirm.set(None);
+                        });
+                    }
+                })
+            />
+
+            <ConfirmModal
+                open=batch_delete_confirm.into()
+                title="Supprimer les périodes sélectionnées"
+                message=Signal::derive(move || {
+                    let count = selected.get().len();
+                    format!("Êtes-vous sûr de vouloir supprimer les {count} période(s) sélectionnée(s) ?")
+                })
+                confirm_label="Supprimer tout"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| batch_delete_confirm.set(false))
+                on_confirm=Callback::new(move |_| {
+                    let ids = selected.get_untracked();
+                    if ids.is_empty() {
+                        batch_delete_confirm.set(false);
+                        return;
+                    }
+                    spawn_local(async move {
+                        for id in ids {
+                            let _ = api::delete_planning_period(&id, true).await;
+                        }
+                        selected.set(Vec::new());
+                        reload();
+                        batch_delete_confirm.set(false);
+                    });
+                })
+            />
             </>
             </Show>
         </div>

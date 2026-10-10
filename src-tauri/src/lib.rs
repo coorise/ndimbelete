@@ -64,6 +64,7 @@ pub fn run() {
             commands::list_roles,
             commands::create_role,
             commands::update_role,
+            commands::delete_role,
             // Members
             commands::list_members,
             commands::get_member,
@@ -75,6 +76,7 @@ pub fn run() {
             commands::list_member_roles,
             commands::create_member_role,
             commands::update_member_role,
+            commands::delete_member_role,
             // Cotisations
             commands::get_year_grid,
             commands::set_monthly_amount,

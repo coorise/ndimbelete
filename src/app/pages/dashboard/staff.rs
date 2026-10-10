@@ -892,6 +892,8 @@ fn RolesTab(
     let name = RwSignal::new(String::new());
     let selected_permissions = RwSignal::new(Vec::<String>::new());
     let form_error = RwSignal::new(Option::<String>::None);
+    let action_error = RwSignal::new(Option::<String>::None);
+    let delete_confirm = RwSignal::new(Option::<(String, String)>::None);
 
     let has_star = Signal::derive(move || {
         selected_permissions.get().iter().any(|p| p == "*")
@@ -899,6 +901,12 @@ fn RolesTab(
 
     view! {
         <div class="flex flex-col gap-4">
+            <Show when=move || action_error.get().is_some()>
+                <p class="rounded-xl bg-[color-mix(in_srgb,var(--brand-red)_12%,transparent)] px-3 py-2 text-sm text-[var(--brand-red)]" role="alert">
+                    {move || action_error.get().unwrap_or_default()}
+                </p>
+            </Show>
+
             <Show when=move || can_write.get()>
                 <div class="flex justify-end">
                     <Button on_click=Callback::new(move |_| {
@@ -906,6 +914,7 @@ fn RolesTab(
                         name.set(String::new());
                         selected_permissions.set(vec!["*".into()]);
                         form_error.set(None);
+                        action_error.set(None);
                         open.set(true);
                     })>
                         "Nouveau rôle"
@@ -925,6 +934,23 @@ fn RolesTab(
                         key=|r| r.id.clone()
                         children=move |r| {
                             let r_edit = r.clone();
+                            let r_id = r.id.clone();
+                            let r_name = r.name.clone();
+                            let is_founder = r.name.to_lowercase() == "fondateur";
+                            let delete_role_btn = (!is_founder).then(|| {
+                                let r_id = r_id.clone();
+                                let r_name = r_name.clone();
+                                view! {
+                                    <Button
+                                        variant=ButtonVariant::Danger
+                                        on_click=Callback::new(move |_| {
+                                            delete_confirm.set(Some((r_id.clone(), r_name.clone())));
+                                        })
+                                    >
+                                        "Supprimer"
+                                    </Button>
+                                }
+                            });
                             let perm_keys = parse_permissions_list(&r.permissions_json);
                             view! {
                                 <Tr>
@@ -944,7 +970,7 @@ fn RolesTab(
                                         </div>
                                     </Td>
                                     <Td>
-                                        <div class:hidden=move || !can_write.get()>
+                                        <div class="flex flex-wrap gap-2" class:hidden=move || !can_write.get()>
                                             <Button
                                                 variant=ButtonVariant::Secondary
                                                 on_click=Callback::new(move |_| {
@@ -954,11 +980,13 @@ fn RolesTab(
                                                         parse_permissions_list(&r_edit.permissions_json),
                                                     );
                                                     form_error.set(None);
+                                                    action_error.set(None);
                                                     open.set(true);
                                                 })
                                             >
                                                 "Modifier"
                                             </Button>
+                                            {delete_role_btn}
                                         </div>
                                     </Td>
                                 </Tr>
@@ -1058,6 +1086,38 @@ fn RolesTab(
                     </Button>
                 </div>
             </Modal>
+
+            <ConfirmModal
+                open=Signal::derive(move || delete_confirm.get().is_some())
+                title="Supprimer le rôle"
+                message=Signal::derive(move || {
+                    if let Some((_, name)) = delete_confirm.get() {
+                        format!("Êtes-vous sûr de vouloir supprimer le rôle « {name} » ? Cette action est irréversible.")
+                    } else {
+                        String::new()
+                    }
+                })
+                confirm_label="Supprimer"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| delete_confirm.set(None))
+                on_confirm=Callback::new(move |_| {
+                    if let Some((id, _)) = delete_confirm.get_untracked() {
+                        spawn_local(async move {
+                            match api::delete_role(&id).await {
+                                Ok(()) => {
+                                    action_error.set(None);
+                                    delete_confirm.set(None);
+                                    on_change.run(());
+                                }
+                                Err(e) => {
+                                    action_error.set(Some(e));
+                                    delete_confirm.set(None);
+                                }
+                            }
+                        });
+                    }
+                })
+            />
         </div>
     }
 }

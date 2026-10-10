@@ -319,6 +319,10 @@ pub async fn update_role(input: UpdateRoleInput) -> Result<Role, String> {
     invoke("update_role", InputArg { input }).await
 }
 
+pub async fn delete_role(id: &str) -> Result<(), String> {
+    invoke_unit("delete_role", IdArg { id }).await
+}
+
 // —— Member roles ——
 
 pub async fn list_member_roles() -> Result<Vec<MemberRole>, String> {
@@ -331,6 +335,10 @@ pub async fn create_member_role(input: CreateMemberRoleInput) -> Result<MemberRo
 
 pub async fn update_member_role(input: UpdateMemberRoleInput) -> Result<MemberRole, String> {
     invoke("update_member_role", InputArg { input }).await
+}
+
+pub async fn delete_member_role(id: &str) -> Result<(), String> {
+    invoke_unit("delete_member_role", IdArg { id }).await
 }
 
 // —— Members ——

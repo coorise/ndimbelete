@@ -68,3 +68,35 @@ pub fn update_role(state: State<'_, AppState>, input: UpdateRoleInput) -> Result
     )
     .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn delete_role(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conn = state.db.lock();
+
+    let role_name: String = conn
+        .query_row("SELECT name FROM roles WHERE id = ?1", [&id], |r| r.get(0))
+        .map_err(|_| "Rôle introuvable.".to_string())?;
+
+    if role_name.to_lowercase() == "fondateur" {
+        return Err("Le rôle Fondateur ne peut pas être supprimé.".into());
+    }
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM staff WHERE role_id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err(format!(
+            "Impossible de supprimer le rôle « {role_name} » : il est actuellement attribué à {count} membre(s) du personnel."
+        ));
+    }
+
+    conn.execute("DELETE FROM roles WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
