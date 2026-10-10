@@ -6,7 +6,7 @@ use wasm_bindgen::JsCast;
 
 use crate::app::components::cotisations::{ExcelImportModal, PaymentModal, ReceiptDialog};
 use crate::app::components::ui::{
-    Button, ButtonVariant, EditableCell, Input, LazyScrollRegion, Modal, MultiSelect,
+    Button, ButtonVariant, ConfirmModal, EditableCell, Input, LazyScrollRegion, Modal, MultiSelect,
     RowDensitySlider, Select, SelectOption, Table, TableFullscreenToggle, TableLoadMode,
     TablePaginationBar, TBody, Td, Th, THead, Tr, DEFAULT_TABLE_LOAD_MODE, default_lazy_count,
     paginate_slice,
@@ -208,6 +208,8 @@ pub fn CotisationsPage() -> impl IntoView {
         RwSignal::new(HashMap::<String, (String, String, String, String)>::new());
     let cell_save_gen = RwSignal::new(0u64);
     let cell_saving = RwSignal::new(false);
+    let batch_delete_confirm = RwSignal::new(false);
+    let clear_confirm = RwSignal::new(Option::<(String, String, String)>::None);
 
     let reload = move || {
         let y = year.get_untracked();
@@ -993,23 +995,7 @@ pub fn CotisationsPage() -> impl IntoView {
                         <Button
                             variant=ButtonVariant::Danger
                             on_click=Callback::new(move |_| {
-                                let ids = selected.get_untracked();
-                                if ids.is_empty() {
-                                    return;
-                                }
-                                spawn_local(async move {
-                                    match api::delete_members(ids).await {
-                                        Ok(n) => {
-                                            selected.set(Vec::new());
-                                            error.set(None);
-                                            web_sys::console::log_1(
-                                                &format!("Supprimé {n} membre(s)").into(),
-                                            );
-                                            reload();
-                                        }
-                                        Err(e) => error.set(Some(e)),
-                                    }
-                                });
+                                batch_delete_confirm.set(true);
                             })
                         >
                             {move || format!("Supprimer ({})", selected.get().len())}
@@ -1217,12 +1203,8 @@ pub fn CotisationsPage() -> impl IntoView {
                                                             error.set(Some("Sélectionnez un mois actuel.".into()));
                                                             return;
                                                         }
-                                                        spawn_local(async move {
-                                                            match api::clear_payment(&mid, &pid).await {
-                                                                Ok(_) => reload(),
-                                                                Err(e) => error.set(Some(e)),
-                                                            }
-                                                        });
+                                                        let name = format!("{} {}", row_clear.member.last_name, row_clear.member.first_name);
+                                                        clear_confirm.set(Some((mid, pid, name)));
                                                     })
                                                 >
                                                     "🗑"
@@ -1637,12 +1619,8 @@ pub fn CotisationsPage() -> impl IntoView {
                                                             error.set(Some("Sélectionnez un mois actuel.".into()));
                                                             return;
                                                         }
-                                                        spawn_local(async move {
-                                                            match api::clear_payment(&mid, &pid).await {
-                                                                Ok(_) => reload(),
-                                                                Err(e) => error.set(Some(e)),
-                                                            }
-                                                        });
+                                                        let name = format!("{} {}", row_clear.member.last_name, row_clear.member.first_name);
+                                                        clear_confirm.set(Some((mid, pid, name)));
                                                     })
                                                 >
                                                     "🗑"
@@ -1793,6 +1771,62 @@ pub fn CotisationsPage() -> impl IntoView {
                 on_done=Callback::new(move |_| reload())
             />
             <ReceiptDialog receipt=receipt />
+
+            <ConfirmModal
+                open=batch_delete_confirm.into()
+                title="Supprimer les membres sélectionnés"
+                message=Signal::derive(move || {
+                    let count = selected.get().len();
+                    format!("Êtes-vous sûr de vouloir supprimer les {count} membre(s) sélectionné(s) ? Cette action est irréversible.")
+                })
+                confirm_label="Supprimer tout"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| batch_delete_confirm.set(false))
+                on_confirm=Callback::new(move |_| {
+                    let ids = selected.get_untracked();
+                    if ids.is_empty() {
+                        batch_delete_confirm.set(false);
+                        return;
+                    }
+                    spawn_local(async move {
+                        match api::delete_members(ids).await {
+                            Ok(_) => {
+                                selected.set(Vec::new());
+                                error.set(None);
+                                reload();
+                            }
+                            Err(e) => error.set(Some(e)),
+                        }
+                        batch_delete_confirm.set(false);
+                    });
+                })
+            />
+
+            <ConfirmModal
+                open=Signal::derive(move || clear_confirm.get().is_some())
+                title="Effacer le paiement"
+                message=Signal::derive(move || {
+                    if let Some((_, _, name)) = clear_confirm.get() {
+                        format!("Êtes-vous sûr de vouloir effacer le paiement pour « {name} » sur la période sélectionnée ?")
+                    } else {
+                        String::new()
+                    }
+                })
+                confirm_label="Effacer"
+                confirm_variant=ButtonVariant::Danger
+                on_close=Callback::new(move |_| clear_confirm.set(None))
+                on_confirm=Callback::new(move |_| {
+                    if let Some((mid, pid, _)) = clear_confirm.get_untracked() {
+                        spawn_local(async move {
+                            match api::clear_payment(&mid, &pid).await {
+                                Ok(_) => reload(),
+                                Err(e) => error.set(Some(e)),
+                            }
+                            clear_confirm.set(None);
+                        });
+                    }
+                })
+            />
         </div>
     }
 }

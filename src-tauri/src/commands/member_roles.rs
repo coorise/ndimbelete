@@ -82,3 +82,35 @@ pub fn update_member_role(
     )
     .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn delete_member_role(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conn = state.db.lock();
+
+    let role_name: String = conn
+        .query_row(
+            "SELECT name FROM member_roles WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "Rôle membre introuvable.".to_string())?;
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM members WHERE member_role_id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err(format!(
+            "Impossible de supprimer le rôle membre « {role_name} » : il est actuellement attribué à {count} membre(s)."
+        ));
+    }
+
+    conn.execute("DELETE FROM member_roles WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
