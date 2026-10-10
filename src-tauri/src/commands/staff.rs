@@ -222,3 +222,88 @@ pub fn deactivate_staff(state: State<'_, AppState>, id: String) -> Result<(), St
     );
     Ok(())
 }
+
+#[tauri::command]
+pub fn activate_staff(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conn = state.db.lock();
+    let name: String = conn
+        .query_row(
+            "SELECT TRIM(first_name || ' ' || last_name) FROM staff WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| id.clone());
+    let n = conn
+        .execute("UPDATE staff SET is_active = 1 WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("Staff introuvable".into());
+    }
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_STAFF,
+        "activate",
+        format!("Activation du personnel « {name} »"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_staff(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conn = state.db.lock();
+    if let Some(founder) = founder_id(&conn) {
+        if founder == id {
+            return Err("Le premier compte enregistré ne peut pas être supprimé".into());
+        }
+    }
+    let name: String = conn
+        .query_row(
+            "SELECT TRIM(first_name || ' ' || last_name) FROM staff WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| id.clone());
+    let n = conn
+        .execute("DELETE FROM staff WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("Staff introuvable".into());
+    }
+    crate::commands::note(
+        &state,
+        &conn,
+        crate::db::AREA_STAFF,
+        "delete",
+        format!("Suppression du personnel « {name} »"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_staffs(state: State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    let conn = state.db.lock();
+    let founder = founder_id(&conn);
+    let mut deleted = 0usize;
+    let count = ids.len();
+    for id in ids {
+        if founder.as_deref() == Some(&id) {
+            continue;
+        }
+        let n = conn
+            .execute("DELETE FROM staff WHERE id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+        deleted += n;
+    }
+    if deleted > 0 {
+        crate::commands::note(
+            &state,
+            &conn,
+            crate::db::AREA_STAFF,
+            "delete",
+            format!("Suppression de {deleted} membre(s) du personnel (sélection de {count})"),
+        );
+    }
+    Ok(deleted)
+}
+

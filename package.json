@@ -6,7 +6,8 @@
     "css:build": "bunx @tailwindcss/cli -i ./src/styles/input.css -o ./styles.css --minify",
     "css:watch": "bunx @tailwindcss/cli -i ./src/styles/input.css -o ./styles.css --watch",
     "trunk:serve": "bun run scripts/trunk.mjs serve",
-    "trunk:build": "bun run scripts/trunk.mjs build"
+    "trunk:build": "bun run scripts/trunk.mjs build",
+    "cache:sweep": "cargo sweep --installed && cargo sweep --maxsize 4GB"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

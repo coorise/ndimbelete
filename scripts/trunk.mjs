@@ -14,7 +14,29 @@ const child = spawn("trunk", args, {
   shell: true,
 });
 
+const cleanup = () => {
+  if (child && child.pid) {
+    try {
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", child.pid.toString(), "/f", "/t"], { stdio: "ignore" });
+      } else {
+        child.kill("SIGTERM");
+      }
+    } catch (_) {}
+  }
+};
+
+process.on("SIGINT", () => {
+  cleanup();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  cleanup();
+  process.exit(0);
+});
+
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
-  process.exit(code ?? 1);
+  process.exit(code ?? 0);
 });

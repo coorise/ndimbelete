@@ -108,6 +108,7 @@ struct PreviewExcelArg<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct ImportExcelArg<'a> {
     path: &'a str,
     sheet_name: &'a str,
@@ -292,6 +293,18 @@ pub async fn deactivate_staff(id: &str) -> Result<(), String> {
     invoke_unit("deactivate_staff", IdArg { id }).await
 }
 
+pub async fn activate_staff(id: &str) -> Result<(), String> {
+    invoke_unit("activate_staff", IdArg { id }).await
+}
+
+pub async fn delete_staff(id: &str) -> Result<(), String> {
+    invoke_unit("delete_staff", IdArg { id }).await
+}
+
+pub async fn delete_staffs(ids: Vec<String>) -> Result<usize, String> {
+    invoke("delete_staffs", IdsArg { ids }).await
+}
+
 // —— Roles ——
 
 pub async fn list_roles() -> Result<Vec<Role>, String> {
@@ -336,6 +349,10 @@ pub async fn update_member(input: UpdateMemberInput) -> Result<Member, String> {
 
 pub async fn search_members(query: &str) -> Result<Vec<Member>, String> {
     invoke("search_members", QueryArg { query }).await
+}
+
+pub async fn delete_member(id: &str) -> Result<(), String> {
+    invoke_unit("delete_member", IdArg { id }).await
 }
 
 pub async fn delete_members(ids: Vec<String>) -> Result<usize, String> {
@@ -510,11 +527,13 @@ pub async fn get_overview_stats(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct OverviewMembersArg<'a> {
     year: i32,
     category: &'a str,
 }
 
+#[allow(dead_code)]
 pub async fn list_overview_members(
     year: i32,
     category: &str,
@@ -539,6 +558,7 @@ pub async fn preview_excel(
     .await
 }
 
+#[allow(dead_code)]
 pub async fn import_excel(
     path: &str,
     sheet_name: &str,
