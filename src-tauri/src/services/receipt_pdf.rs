@@ -49,17 +49,47 @@ pub struct PrinterInfo {
 }
 
 fn find_font_path() -> Result<PathBuf, String> {
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-    let candidates = [
-        PathBuf::from(&windir).join("Fonts").join("arial.ttf"),
-        PathBuf::from(&windir).join("Fonts").join("calibri.ttf"),
-        PathBuf::from(&windir).join("Fonts").join("segoeui.ttf"),
-        PathBuf::from(&windir).join("Fonts").join("tahoma.ttf"),
-    ];
-    candidates
-        .into_iter()
-        .find(|p| p.exists())
-        .ok_or_else(|| "Aucune police système (Arial/Calibri) trouvée pour le PDF.".into())
+    #[cfg(target_os = "windows")]
+    {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+        let candidates = [
+            PathBuf::from(&windir).join("Fonts").join("arial.ttf"),
+            PathBuf::from(&windir).join("Fonts").join("calibri.ttf"),
+            PathBuf::from(&windir).join("Fonts").join("segoeui.ttf"),
+            PathBuf::from(&windir).join("Fonts").join("tahoma.ttf"),
+        ];
+        if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+            return Ok(p);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let candidates = [
+            PathBuf::from("/System/Library/Fonts/Supplemental/Arial.ttf"),
+            PathBuf::from("/Library/Fonts/Arial.ttf"),
+            PathBuf::from("/System/Library/Fonts/Helvetica.ttc"),
+        ];
+        if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+            return Ok(p);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let candidates = [
+            PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+            PathBuf::from("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+            PathBuf::from("/usr/share/fonts/truetype/freefont/FreeSans.ttf"),
+            PathBuf::from("/usr/share/fonts/TTF/DejaVuSans.ttf"),
+            PathBuf::from("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"),
+        ];
+        if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+            return Ok(p);
+        }
+    }
+
+    Err("Aucune police système (Arial/DejaVu) trouvée pour la génération du PDF.".into())
 }
 
 pub fn build_receipt_lines(payload: &ReceiptPrintPayload, settings: &AppSettings) -> Vec<RenderedLine> {
