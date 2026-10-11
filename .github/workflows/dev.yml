@@ -24,7 +24,7 @@ jobs:
           - platform: windows-latest
             args: ""
           - platform: macos-latest
-            args: ""
+            args: "--target universal-apple-darwin"
           - platform: ubuntu-22.04
             args: ""
 
@@ -41,6 +41,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Add macOS compilation targets (Apple Silicon + Intel Universal)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -80,7 +84,7 @@ jobs:
 
             Cross-platform desktop application:
             - **Windows**: `.exe` (installer) / `.msi`
-            - **macOS**: `.dmg`
+            - **macOS**: `.dmg` (Universal: Apple Silicon M1/M2/M3/M4 + Intel Core i3/i5/i7/i9)
             - **Linux**: `.AppImage` / `.deb`
 
             Collaboration remote defaults to the DEV database when configured.
