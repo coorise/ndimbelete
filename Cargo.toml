@@ -41,7 +41,6 @@ members = ["src-tauri"]
 [profile.dev]
 opt-level = 0
 debug = 1
-split-debuginfo = "unpacked"
 
 # Optimize all dependencies in dev mode for fast runtime and minimal cache bloat
 [profile.dev.package."*"]

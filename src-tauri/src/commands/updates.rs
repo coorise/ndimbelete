@@ -78,13 +78,37 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
-fn pick_windows_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
-    assets.iter().find(|a| {
-        let n = a.name.to_lowercase();
-        (n.ends_with(".exe") || n.ends_with(".msi"))
-            && !n.contains("setup.exe.sig")
-            && !n.ends_with(".sig")
-    })
+fn pick_platform_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
+    #[cfg(target_os = "windows")]
+    {
+        assets.iter().find(|a| {
+            let n = a.name.to_lowercase();
+            (n.ends_with(".exe") || n.ends_with(".msi"))
+                && !n.contains("setup.exe.sig")
+                && !n.ends_with(".sig")
+        })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        assets.iter().find(|a| {
+            let n = a.name.to_lowercase();
+            (n.ends_with(".dmg") || n.ends_with(".app.tar.gz"))
+                && !n.ends_with(".sig")
+        })
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assets.iter().find(|a| {
+            let n = a.name.to_lowercase();
+            (n.ends_with(".appimage") || n.ends_with(".deb"))
+                && !n.ends_with(".sig")
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = assets;
+        None
+    }
 }
 
 fn release_matches_channel(rel: &GhRelease, channel: &str) -> bool {
@@ -154,14 +178,14 @@ pub fn check_for_update() -> Result<UpdateInfo, String> {
     };
 
     let latest_ver = normalize_version(&rel.tag_name);
-    let asset = pick_windows_asset(&rel.assets);
+    let asset = pick_platform_asset(&rel.assets);
     let available = is_newer(&latest_ver, &current) && asset.is_some();
 
     let message = if available {
         format!("Nouvelle version {latest_ver} disponible (actuelle : {current}).")
     } else if asset.is_none() && is_newer(&latest_ver, &current) {
         format!(
-            "Version {latest_ver} publiée, mais aucun installateur Windows n’est encore disponible."
+            "Version {latest_ver} publiée, mais aucun paquet d'installation n’est encore disponible pour votre système."
         )
     } else {
         format!("Vous êtes à jour ({current}).")
@@ -215,54 +239,91 @@ pub fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> 
         .ok_or_else(|| "URL de téléchargement manquante.".to_string())?;
     let name = info
         .asset_name
-        .unwrap_or_else(|| "ndimbelente-setup.exe".into());
+        .unwrap_or_else(|| "ndimbelente-update".into());
 
     let dest = std::env::temp_dir().join(format!("ndimbelente-update-{name}"));
     download_file(&url, &dest)?;
 
-    let path_str = dest
-        .to_str()
-        .ok_or_else(|| "Chemin installateur invalide.".to_string())?
-        .replace('\'', "''");
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = dest
+            .to_str()
+            .ok_or_else(|| "Chemin installateur invalide.".to_string())?
+            .replace('\'', "''");
 
-    let current_exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.replace('\'', "''")));
+        let current_exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.replace('\'', "''")));
 
-    let install_cmd = if path_str.to_lowercase().ends_with(".msi") {
-        format!("Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', '\"{path_str}\"', '/qn', '/norestart' -Wait")
-    } else {
-        format!("Start-Process -FilePath '{path_str}' -ArgumentList '/S' -Wait")
-    };
+        let install_cmd = if path_str.to_lowercase().ends_with(".msi") {
+            format!("Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', '\"{path_str}\"', '/qn', '/norestart' -Wait")
+        } else {
+            format!("Start-Process -FilePath '{path_str}' -ArgumentList '/S' -Wait")
+        };
 
-    let relaunch_cmd = match &current_exe {
-        Some(exe) => format!(
-            "; Start-Sleep -Seconds 1; if (Test-Path -LiteralPath '{exe}') {{ Start-Process -FilePath '{exe}' }}"
-        ),
-        None => String::new(),
-    };
+        let relaunch_cmd = match &current_exe {
+            Some(exe) => format!(
+                "; Start-Sleep -Seconds 1; if (Test-Path -LiteralPath '{exe}') {{ Start-Process -FilePath '{exe}' }}"
+            ),
+            None => String::new(),
+        };
 
-    // Wait for silent install, delete the setup, and auto relaunch the updated application.
-    let ps = format!(
-        "{install_cmd}; \
-         Start-Sleep -Seconds 2; \
-         Remove-Item -LiteralPath '{path_str}' -Force -ErrorAction SilentlyContinue{relaunch_cmd}"
-    );
+        // Wait for silent install, delete the setup, and auto relaunch the updated application.
+        let ps = format!(
+            "{install_cmd}; \
+             Start-Sleep -Seconds 2; \
+             Remove-Item -LiteralPath '{path_str}' -Force -ErrorAction SilentlyContinue{relaunch_cmd}"
+        );
 
-    Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &ps,
-        ])
-        .spawn()
-        .map_err(|e| format!("Lancement installateur: {e}"))?;
+        Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &ps,
+            ])
+            .spawn()
+            .map_err(|e| format!("Lancement installateur: {e}"))?;
 
-    // Quit so the installer can overwrite running files.
-    app.exit(0);
-    Ok(())
+        // Quit so the installer can overwrite running files.
+        app.exit(0);
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&dest)
+            .spawn()
+            .map_err(|e| format!("Ouverture installateur macOS: {e}"))?;
+        app.exit(0);
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        #[cfg(target_family = "unix")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(&dest) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&dest, perms);
+            }
+        }
+        let _ = Command::new("xdg-open")
+            .arg(&dest)
+            .spawn();
+        app.exit(0);
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (app, dest);
+        Err("Mise à jour automatique non prise en charge sur cette plateforme.".into())
+    }
 }
